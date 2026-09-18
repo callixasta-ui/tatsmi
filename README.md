@@ -5,11 +5,25 @@ A browser-based simulator of classic Amadeus-style "cryptic" GDS commands
 real airline inventory or GDS — all availability is fake/deterministic.
 
 - **CLI panel** (top/left): type commands, see terminal-style output. Scrollable.
-- **Instructions panel** (bottom/right): command reference + a sample workflow. Scrollable.
-- PNR/session data is kept in the browser's `localStorage`.
+- **Lower/right panel**: a tab toggle between a **Practice Tasks** view (5
+  guided hands-on exercises with self-checking steps and hidden hints) and a
+  plain **Command List** reference. Scrollable.
+- PNR/session data and practice progress are kept in the browser's `localStorage`.
 - Each visit also logs basic session/device info (IP, user agent, parsed
-  browser/OS, timezone, screen size, language) to a Postgres table via Neon,
-  for your own usage analytics. This is disclosed in the page footer.
+  browser/OS, timezone, screen size, language) to a Postgres table via Neon.
+  This is disclosed in the page footer and in the "Your Privacy" popup.
+- Vercel Web Analytics (`@vercel/analytics`) is wired in for page-view/usage
+  stats — enable it in the Vercel dashboard after deploying (see step 4 below).
+
+### Command coverage
+
+This covers the core PNR-building loop end to end: availability (`AN`),
+selling (`SS`), name/contact/remarks/OSI/frequent-flyer elements, ticketing
+arrangement, a fare quote (`FXP`), a seat map (`SM`), cancelling any element
+(`XE`), review/retrieve (`RT`/`RT*`), save (`ER`), discard (`IG`), and city
+decode (`DAC`). Real Amadeus has a lot more beyond this (exchanges, queues,
+splitting PNRs, fare rules, multi-city itineraries, etc.) — this trainer is
+meant as the foundational layer, not the whole system.
 
 ## 1. Push to GitHub
 
@@ -36,7 +50,10 @@ git push -u origin main
 1. Import the GitHub repo at https://vercel.com/new.
 2. In the project's **Settings → Environment Variables**, add:
    - `DATABASE_URL` = the Neon connection string from step 2.
-3. Deploy. That's it — no other config needed.
+3. Deploy.
+4. In the deployed project's dashboard, open the **Analytics** tab and enable
+   it (one click). `@vercel/analytics` is already wired into `app/layout.tsx`
+   — it just needs the project-level toggle turned on to start collecting.
 
 ## Local development
 
