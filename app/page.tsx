@@ -2,7 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import { processCommand, newState, EngineState } from "@/lib/commands";
-import { PRACTICE_TASKS } from "@/lib/practice";
+import { PRACTICE_TASKS, PracticeStep } from "@/lib/practice";
+
+// Matches each step to the earliest history entry that satisfies it and
+// hasn't already been claimed by an earlier step -- so if the same exact
+// command legitimately repeats across steps (e.g. selling the same class
+// on several legs), each occurrence only completes one step, not all of them.
+function computeStepDone(steps: PracticeStep[], history: string[]): boolean[] {
+  const consumed = new Array(history.length).fill(false);
+  return steps.map((step) => {
+    for (let i = 0; i < history.length; i++) {
+      if (!consumed[i] && step.matcher.test(history[i])) {
+        consumed[i] = true;
+        return true;
+      }
+    }
+    return false;
+  });
+}
 
 const STORAGE_KEY = "gds-trainer-state-v2";
 
@@ -200,13 +217,13 @@ export default function Page() {
             {tab === "practice" && (
               <>
                 <div className="practice-intro">
-                  Work through these in order. Type the commands into the CLI on the left -- each
-                  step checks itself off automatically once you get it right. Stuck? Tap "Show hint"
-                  for the exact command.
+                  This is a real booking request: Ms. Nhayanne Bayos needs a 5-city trip with her
+                  husband arranged exactly to spec. Work through it in order -- each step checks
+                  itself off once you type it correctly. Stuck? Tap "Show hint" for the exact command.
                 </div>
                 {PRACTICE_TASKS.map((task) => {
-                  const doneCount = task.steps.filter((st) => history.some((h) => st.matcher.test(h))).length;
-                  const complete = doneCount === task.steps.length;
+                  const doneFlags = computeStepDone(task.steps, history);
+                  const complete = doneFlags.every(Boolean);
                   return (
                     <div className="task-card" key={task.id}>
                       <div className="task-title">
@@ -214,7 +231,7 @@ export default function Page() {
                       </div>
                       <div className="task-goal">{task.goal}</div>
                       {task.steps.map((step, i) => {
-                        const stepDone = history.some((h) => step.matcher.test(h));
+                        const stepDone = doneFlags[i];
                         const key = `${task.id}-${i}`;
                         return (
                           <div className={stepDone ? "step-row step-done" : "step-row"} key={key}>

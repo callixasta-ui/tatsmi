@@ -11,110 +11,51 @@ export interface PracticeTask {
   steps: PracticeStep[];
 }
 
+// This mirrors an actual work order: Ms. Nhayanne Bayos, on a break from
+// accounting, wants a 5-city trip with her husband. Build it exactly as
+// specified -- itineraries, both passengers, both contacts, and the
+// ticketing deadline.
 export const PRACTICE_TASKS: PracticeTask[] = [
   {
-    id: "t1",
-    title: "1. Your First Availability Check",
-    goal: "Learn the AN entry: pull flight availability for a specific route and date.",
+    id: "itin",
+    title: "1. Book the Itinerary — 5 Legs, 2 Travelers",
+    goal:
+      "Ms. Nhayanne and Mr. Neil Bayos need Manila → Kuala Lumpur → Bangkok → Phuket → Dubai → Manila. " +
+      "Pull availability for each leg and sell 2 seats before moving to the next.",
     steps: [
-      {
-        instruction: "Check availability from Manila (MNL) to Cebu (CEB) for December 20.",
-        hint: "AN20DECMNLCEB",
-        matcher: /^AN20DECMNLCEB$/,
-      },
+      { instruction: "Availability: Manila (MNL) to Kuala Lumpur (KUL), September 20.", hint: "AN20SEPMNLKUL", matcher: /^AN20SEPMNLKUL$/ },
+      { instruction: "Sell 2 seats from line 1 (both travelers, same flight).", hint: "SS2B1", matcher: /^SS2B1$/ },
+      { instruction: "Availability: Kuala Lumpur (KUL) to Bangkok (BKK), September 23.", hint: "AN23SEPKULBKK", matcher: /^AN23SEPKULBKK$/ },
+      { instruction: "Sell 2 seats from line 1.", hint: "SS2Q1", matcher: /^SS2Q1$/ },
+      { instruction: "Availability: Bangkok (BKK) to Phuket (HKT), September 26.", hint: "AN26SEPBKKHKT", matcher: /^AN26SEPBKKHKT$/ },
+      { instruction: "Sell 2 seats from line 1.", hint: "SS2K1", matcher: /^SS2K1$/ },
+      { instruction: "Availability: Phuket (HKT) to Dubai (DXB), September 29.", hint: "AN29SEPHKTDXB", matcher: /^AN29SEPHKTDXB$/ },
+      { instruction: "Sell 2 seats from line 1.", hint: "SS2B1", matcher: /^SS2B1$/ },
+      { instruction: "Availability: Dubai (DXB) to Manila (MNL), October 6.", hint: "AN06OCTDXBMNL", matcher: /^AN06OCTDXBMNL$/ },
+      { instruction: "Sell 2 seats from line 1.", hint: "SS2B1", matcher: /^SS2B1$/ },
     ],
   },
   {
-    id: "t2",
-    title: "2. Sell Your First Seat",
-    goal: "Learn the SS entry: sell a seat from a line on the availability screen.",
+    id: "pax",
+    title: "2. Add Passengers & Contacts",
+    goal: "Add both travelers by name, then both of their contact numbers and emails.",
     steps: [
-      {
-        instruction: "Check availability from London (LON) to Bangkok (BKK) for December 15.",
-        hint: "AN15DECLONBKK",
-        matcher: /^AN15DECLONBKK$/,
-      },
-      {
-        instruction: "Sell 1 seat in class Y from line 1 of that screen.",
-        hint: "SS1Y1",
-        matcher: /^SS1Y1$/,
-      },
+      { instruction: "Add passenger: BAYOS / NAYAN, title MS.", hint: "NM1BAYOS/NAYAN MS", matcher: /^NM\d+BAYOS\/NAYAN(\s+MS)?$/ },
+      { instruction: "Add passenger: BAYOS / NEIL, title MR.", hint: "NM2BAYOS/NEIL MR", matcher: /^NM\d+BAYOS\/NEIL(\s+MR)?$/ },
+      { instruction: "Add Mr. Neil Bayos's mobile number (09987654321).", hint: "AP 09987654321", matcher: /^AP\s+09987654321$/ },
+      { instruction: "Add Mr. Neil Bayos's email (pako_28@nomail.com).", hint: "AP pako_28@nomail.com", matcher: /^AP\s+PAKO_28@NOMAIL\.COM$/ },
+      { instruction: "Add Ms. Nhayanne Bayos's mobile number (09123456789).", hint: "AP 09123456789", matcher: /^AP\s+09123456789$/ },
+      { instruction: "Add Ms. Nhayanne Bayos's email (bhoszx_nayan28@nomail.com).", hint: "AP bhoszx_nayan28@nomail.com", matcher: /^AP\s+BHOSZX_NAYAN28@NOMAIL\.COM$/ },
     ],
   },
   {
-    id: "t3",
-    title: "3. Build a Complete Booking",
-    goal: "Chain availability, sell, name, contact and ticketing into one bookable PNR.",
+    id: "ticket",
+    title: "3. Set the Ticketing Deadline & Save",
+    goal: "Tickets must be issued to Ms. Nhayanne on or before September 16 — set that as the time limit, review, then save.",
     steps: [
-      {
-        instruction: "Check availability from New York (NYC) to Paris (PAR) for January 5.",
-        hint: "AN05JANNYCPAR",
-        matcher: /^AN05JANNYCPAR$/,
-      },
-      {
-        instruction: "Sell 1 seat in class M from line 2.",
-        hint: "SS1M2",
-        matcher: /^SS1M2$/,
-      },
-      {
-        instruction: "Add the passenger: last name DELACRUZ, first name MARIA, title MS.",
-        hint: "NM1DELACRUZ/MARIA MS",
-        matcher: /^NM1DELACRUZ\/MARIA(\s+MS)?$/,
-      },
-      {
-        instruction: "Add a contact phone number (any number works).",
-        hint: "AP 09171234567",
-        matcher: /^AP\s+.+$/,
-      },
-      {
-        instruction: "Set the ticketing arrangement to no time limit.",
-        hint: "TKOK",
-        matcher: /^TKOK$/,
-      },
-      {
-        instruction: "Review the PNR before saving it.",
-        hint: "RT",
-        matcher: /^RT$/,
-      },
-      {
-        instruction: "Save it -- this returns your record locator. Write it down, you'll need it next.",
-        hint: "ER",
-        matcher: /^ER$/,
-      },
-    ],
-  },
-  {
-    id: "t4",
-    title: "4. Retrieve a Saved PNR",
-    goal: "Learn RT* -- pull back a booking using its record locator.",
-    steps: [
-      {
-        instruction: "Using the record locator ER gave you in Task 3, retrieve that PNR.",
-        hint: "RT*<YOUR-LOCATOR>  (e.g. RT*7F3K2Q -- use the code YOU were given, not this example)",
-        matcher: /^RT\*[A-Z0-9]{6}$/,
-      },
-    ],
-  },
-  {
-    id: "t5",
-    title: "5. Decode & Walk Away Clean",
-    goal: "Learn DAC for reference lookups, and IG for abandoning work without saving it.",
-    steps: [
-      {
-        instruction: "Decode the city code SIN.",
-        hint: "DACSIN",
-        matcher: /^DACSIN$/,
-      },
-      {
-        instruction: "Start something new -- check availability from Hong Kong (HKG) to Sydney (SYD) for March 10 -- then abandon it without ever saving.",
-        hint: "AN10MARHKGSYD then IG",
-        matcher: /^AN10MARHKGSYD$/,
-      },
-      {
-        instruction: "Now actually abandon it.",
-        hint: "IG",
-        matcher: /^IG$/,
-      },
+      { instruction: "Set a ticketing time limit of September 16 (office code AGT).", hint: "TKTL16SEP/AGT", matcher: /^TKTL16SEP\/[A-Z0-9]+$/ },
+      { instruction: "Review the PNR before saving.", hint: "RT", matcher: /^RT$/ },
+      { instruction: "Save it — this returns your record locator.", hint: "ER", matcher: /^ER$/ },
     ],
   },
 ];

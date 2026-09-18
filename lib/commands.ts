@@ -79,12 +79,12 @@ function buildAvailability(dateCode: string, origin: string, dest: string): Flig
     const carrier = CARRIERS[r % CARRIERS.length];
     const flightNo = String(100 + (r % 800));
     const classes = ["Y", "B", "M", "H", "Q", "K"];
-    const bookClass = classes[(r >> 3) % classes.length];
-    const seatCount = (r >> 6) % 10;
+    const bookClass = classes[(r >>> 3) % classes.length];
+    const seatCount = (r >>> 6) % 10;
     const status = seatCount === 0 ? "C" : String(seatCount);
-    const depHour = (r >> 9) % 22;
-    const depMin = (r >> 4) % 2 === 0 ? "00" : "30";
-    const durationH = 1 + ((r >> 12) % 12);
+    const depHour = (r >>> 9) % 22;
+    const depMin = (r >>> 4) % 2 === 0 ? "00" : "30";
+    const durationH = 1 + ((r >>> 12) % 12);
     const arrHour = (depHour + durationH) % 24;
     rows.push({
       line: i,
@@ -274,8 +274,10 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // NM1SMITH/JOHN MR
-  const nmMatch = raw.match(/^NM1([A-Za-z]+)\/([A-Za-z]+)(?:\s+([A-Za-z]+))?$/);
+  // NM1SMITH/JOHN MR (also NM2, NM3... for additional passengers -- the
+  // leading number is the real Amadeus passenger-count syntax; we don't
+  // enforce it matching the actual count, just accept any NM<n>)
+  const nmMatch = raw.match(/^NM\d+([A-Za-z]+)\/([A-Za-z]+)(?:\s+([A-Za-z]+))?$/);
   if (nmMatch) {
     const [, last, first, title] = nmMatch;
     s.activePNR.names.push({ last: last.toUpperCase(), first: first.toUpperCase(), title: title?.toUpperCase() });
@@ -364,7 +366,7 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const cols = ["A", "B", "C", "D", "E", "F"];
     for (let row = 10; row <= 14; row++) {
       const r = seededRand(seg.flightNo, row);
-      const seatRow = cols.map((c, i) => (((r >> i) & 1) === 0 ? c : "X")).join(" ");
+      const seatRow = cols.map((c, i) => (((r >>> i) & 1) === 0 ? c : "X")).join(" ");
       out.push(`  ${row}  ${seatRow}`);
     }
     out.push("  (letter = open seat, X = occupied)");
@@ -436,6 +438,12 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       CEB: "CEBU, PHILIPPINES",
       TYO: "TOKYO, JAPAN",
       SYD: "SYDNEY, AUSTRALIA",
+      KUL: "KUALA LUMPUR, MALAYSIA",
+      HKT: "PHUKET, THAILAND",
+      DXB: "DUBAI, UNITED ARAB EMIRATES",
+      DPS: "DENPASAR/BALI, INDONESIA",
+      ICN: "SEOUL, SOUTH KOREA",
+      DOH: "DOHA, QATAR",
     };
     const city = dacMatch[1];
     out.push(table[city] ? `${city} ${table[city]}` : `${city} UNKNOWN CITY CODE (DEMO TABLE LIMITED)`);
