@@ -1,0 +1,132 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0a0e0a;
+  color: #d7ffd7;
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+}
+
+#root-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.topbar {
+  padding: 8px 14px;
+  background: #111a11;
+  border-bottom: 1px solid #2a3a2a;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: #7fbf7f;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.panels {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cli-panel {
+  flex: 1.3;
+  border-bottom: 2px solid #2a3a2a;
+}
+
+.instructions-panel {
+  flex: 1;
+}
+
+.panel-header {
+  padding: 6px 14px;
+  background: #14201a;
+  color: #9ee89e;
+  font-size: 12px;
+  letter-spacing: 1px;
+  border-bottom: 1px solid #2a3a2a;
+  flex-shrink: 0;
+}
+
+.scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cli-line { margin: 0; }
+.cli-line.echo { color: #eaffea; }
+.cli-line.output { color: #7fdc7f; }
+.cli-line.error { color: #ff8f6b; }
+
+.input-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid #2a3a2a;
+  background: #0d130d;
+  flex-shrink: 0;
+}
+
+.prompt {
+  color: #9ee89e;
+  margin-right: 6px;
+  font-weight: bold;
+}
+
+.cli-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #eaffea;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.instructions-panel .scroll-area { color: #cfe8cf; }
+.instr-cmd {
+  color: #9ee89e;
+  font-weight: bold;
+}
+.instr-section {
+  color: #ffd479;
+  margin-top: 14px;
+  margin-bottom: 4px;
+  font-weight: bold;
+}
+.instr-row {
+  margin: 4px 0;
+  padding-left: 4px;
+  border-left: 2px solid #2a3a2a;
+}
+.instr-desc { color: #8fae8f; }
+
+footer.disclosure {
+  font-size: 10px;
+  color: #4d664d;
+  padding: 4px 14px;
+  border-top: 1px solid #1c261c;
+  flex-shrink: 0;
+}
+
+@media (min-width: 900px) {
+  .panels { flex-direction: row; }
+  .cli-panel { border-bottom: none; border-right: 2px solid #2a3a2a; }
+}
