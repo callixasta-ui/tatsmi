@@ -12,6 +12,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
         <Analytics />
+        {/* GDS Study Buddy chat widget -- config.js must load before widget.js */}
+        <script src="/config.js" />
+        <script src="/widget.js" />
       </body>
     </html>
   );

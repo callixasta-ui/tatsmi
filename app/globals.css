@@ -86,6 +86,24 @@ html, body {
   flex-shrink: 0;
 }
 
+.cli-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.clear-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.clear-btn:hover { color: var(--accent); border-color: var(--accent); }
+
 .panel-header.tabs {
   display: flex;
   gap: 6px;
@@ -240,6 +258,34 @@ html, body {
   font-size: 12px;
   display: inline-block;
 }
+
+.db-stats {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.db-stat {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.db-stat-num {
+  display: block;
+  font-size: 20px;
+  color: var(--accent);
+  font-weight: bold;
+}
+.db-row {
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+.db-dim { color: var(--fg-dim); }
+.db-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.db-delete:hover { color: var(--error); border-color: var(--error); }
 
 footer.disclosure {
   font-size: 10px;
