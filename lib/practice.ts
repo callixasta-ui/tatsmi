@@ -38,6 +38,7 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       { instruction: "Review the PNR before saving.", hint: "RT", matcher: /^RT$/ },
       { instruction: "Save it — End & Retrieve hands back a record locator.", hint: "ER", matcher: /^ER$/ },
       { instruction: "Retrieve it again using that locator (real Amadeus syntax: no punctuation, just RT + the locator).", hint: "RT<YOUR-LOCATOR>  e.g. RT7F3K2Q — use YOUR code, not this example", matcher: /^RT[A-Z0-9]{6}$/ },
+      { instruction: "ER leaves the PNR open on screen. Done with this booking? End Transaction — it saves again and wipes the area so the next booking starts clean (no IG needed).", hint: "ET", matcher: /^ET$/ },
     ],
   },
   {
@@ -93,6 +94,7 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       "An actual work order: Ms. Nhayanne and Mr. Neil Bayos need Manila → Kuala Lumpur → Bangkok → Phuket → Dubai → Manila. " +
       "Pull availability for each leg and sell 2 seats before moving to the next.",
     steps: [
+      { instruction: "Start clean: earlier tasks may have left segments in your area. Clear it with IG, or jump to a free work area (JB) and leave the old one untouched.", hint: "IG  (or JB)", matcher: /^(IG|J[B-F])$/ },
       { instruction: "Availability: Manila (MNL) to Kuala Lumpur (KUL), September 20.", hint: "AN20SEPMNLKUL", matcher: /^AN20SEPMNLKUL$/ },
       { instruction: "Sell 2 seats from line 1 (both travelers, same flight).", hint: "SS2B1", matcher: /^SS2B1$/ },
       { instruction: "Availability: Kuala Lumpur (KUL) to Bangkok (BKK), September 23.", hint: "AN23SEPKULBKK", matcher: /^AN23SEPKULBKK$/ },
@@ -127,7 +129,28 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       { instruction: "Set a ticketing time limit of September 16, 5:00 PM.", hint: "TKTL16SEP/1700", matcher: /^TKTL16SEP\/\d{4}$/ },
       { instruction: "Add your Received From signature (any initials).", hint: "RF NB", matcher: /^RF\s*[A-Z]+$/ },
       { instruction: "Review the PNR before saving.", hint: "RT", matcher: /^RT$/ },
-      { instruction: "Save it — this returns your record locator.", hint: "ER", matcher: /^ER$/ },
+      { instruction: "Save it — this returns your record locator. (ER keeps the PNR open, ET saves and clears the area — either works.)", hint: "ER", matcher: /^E[RT]$/ },
+    ],
+  },
+  {
+    id: "t3-work-areas",
+    title: "10. Two Bookings at Once — Work Areas",
+    goal:
+      "Real terminals give you work areas A–F, each holding its own booking in progress. Build one booking, save it with ET, " +
+      "then juggle a second in another area without ever losing the first.",
+    steps: [
+      { instruction: "Check availability from Manila (MNL) to Cebu (CEB) for January 10.", hint: "AN10JANMNLCEB", matcher: /^AN10JANMNLCEB$/ },
+      { instruction: "Sell 1 seat in class Q from line 1.", hint: "SS1Q1", matcher: /^SS1Q1$/ },
+      { instruction: "Add a passenger: DOE / JANE, title MS.", hint: "NM1DOE/JANE MS", matcher: /^NM\d+DOE\/JANE(\s+MS)?$/ },
+      { instruction: "Add a phone contact.", hint: "AP 6621234567", matcher: /^AP\s+6621234567$/ },
+      { instruction: "Set the ticketing arrangement to no time limit.", hint: "TKOK", matcher: /^TKOK$/ },
+      { instruction: "Sign it.", hint: "RF JDOE", matcher: /^RF\s*JDOE$/ },
+      { instruction: "End Transaction: saves the PNR and clears the area in one go.", hint: "ET", matcher: /^ET$/ },
+      { instruction: "Start a second booking without touching the first: jump to work area B.", hint: "JB", matcher: /^JB$/ },
+      { instruction: "In area B, check availability from Manila (MNL) to Hong Kong (HKG) for January 12.", hint: "AN12JANMNLHKG", matcher: /^AN12JANMNLHKG$/ },
+      { instruction: "Sell 1 seat from line 1 (any open class).", hint: "SS1Y1", matcher: /^SS1[A-Z]1$/ },
+      { instruction: "Check the status of all your work areas.", hint: "JO", matcher: /^JO$/ },
+      { instruction: "Jump back to area A.", hint: "JA", matcher: /^JA$/ },
     ],
   },
 ];

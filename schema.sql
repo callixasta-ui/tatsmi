@@ -1,26 +1,19 @@
--- Run this once in the Neon SQL editor (or via psql) before first deploy.
+-- Global Chat tables (Neon Postgres).
+--
+-- You do NOT have to run this by hand: pages/api/global-chat.js creates these
+-- tables automatically on the first request. It's here for reference, or if you
+-- prefer to create them yourself in the Neon SQL editor.
 
-CREATE TABLE IF NOT EXISTS visits (
-  id             SERIAL PRIMARY KEY,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ip             TEXT,
-  user_agent     TEXT,
-  browser        TEXT,
-  os             TEXT,
-  device_type    TEXT,
-  device_vendor  TEXT,
-  device_model   TEXT,
-  timezone       TEXT,
-  screen_res     TEXT,
-  language       TEXT
+CREATE TABLE IF NOT EXISTS chat_users (
+  username_key TEXT PRIMARY KEY,            -- lower-cased username, enforces uniqueness
+  username     TEXT NOT NULL,               -- as the person typed it
+  token_hash   TEXT NOT NULL,               -- SHA-256 of the browser's secret token (proves who owns the name)
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Optional: table to persist PNRs server-side instead of (or in addition to)
--- the browser's localStorage. Not wired up by default -- the app currently
--- keeps PNR history in localStorage only, per the "store data locally" spec.
-CREATE TABLE IF NOT EXISTS pnrs (
-  id             SERIAL PRIMARY KEY,
-  record_locator TEXT UNIQUE NOT NULL,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  payload        JSONB NOT NULL
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id         BIGSERIAL PRIMARY KEY,
+  username   TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

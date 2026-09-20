@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { processCommand, newState, EngineState, PNR } from "@/lib/commands";
+import { processCommand, newState, normalizeState, pnrHasContent, WORK_AREAS, EngineState, PNR } from "@/lib/commands";
 import { PRACTICE_TASKS, PracticeStep } from "@/lib/practice";
 import { FLASHCARDS } from "@/lib/flashcards";
 import { QUIZ_LEVELS } from "@/lib/quiz";
 import { drawBadge, downloadCanvasPng } from "@/lib/badge";
+import GlobalChat from "./GlobalChat";
 
 const STORAGE_KEY = "gds-trainer-state-v3";
 
 type Line = { text: string; kind: "echo" | "output" | "error" };
-type Tab = "practice" | "commands" | "flashcards" | "quiz" | "database";
+type Tab = "practice" | "commands" | "flashcards" | "quiz" | "database" | "chat";
 
 interface QuizResult {
   score: number;
@@ -87,9 +88,17 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     rows: [
       { cmd: "RT", desc: "Redisplay the active (in-progress) PNR, elements numbered" },
       { cmd: "XE3", desc: "Cancel element number 3 (from the RT numbering)" },
-      { cmd: "ER", desc: "End transaction -- saves PNR, gives a record locator" },
+      { cmd: "ER", desc: "End & redisplay -- saves the PNR, gives a record locator, PNR stays open on screen" },
+      { cmd: "ET", desc: "End transaction -- saves the PNR, then clears the area for the next booking" },
       { cmd: "RT7F3K2Q", desc: "Retrieve a saved PNR by locator (no punctuation)" },
       { cmd: "IG", desc: "Discard the active PNR without saving" },
+    ],
+  },
+  {
+    section: "WORK AREAS (SEVERAL BOOKINGS AT ONCE)",
+    rows: [
+      { cmd: "JB", desc: "Jump to work area B (JA-JF). Each area keeps its own PNR in progress" },
+      { cmd: "JO", desc: "Show which areas are empty, in progress, or holding a saved PNR" },
     ],
   },
   {
@@ -130,7 +139,7 @@ export default function Page() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.lines) setLines(parsed.lines);
-        if (parsed.engine) setEngine(parsed.engine);
+        if (parsed.engine) setEngine(normalizeState(parsed.engine));
         if (parsed.history) setHistory(parsed.history);
         if (parsed.revealed) setRevealed(parsed.revealed);
         if (parsed.quizResults) setQuizResults(parsed.quizResults);
@@ -354,9 +363,30 @@ export default function Page() {
         <section className="panel cli-panel">
           <div className="panel-header cli-header">
             <span>CLI</span>
-            <button className="clear-btn" onClick={clearScreen} title="Clear screen (CLS) -- keeps your PNR and progress">
-              Clear screen
-            </button>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div className="area-chips" title="Work areas: each holds its own booking in progress. Green = has a PNR.">
+                <span className="area-chips-label">AREA</span>
+                {WORK_AREAS.map((a) => {
+                  const pnr = a === engine.area ? engine.activePNR : engine.parked?.[a]?.activePNR;
+                  const used = !!pnr && pnrHasContent(pnr);
+                  const cls = "area-chip" + (a === engine.area ? " on" : used ? " used" : "");
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      className={cls}
+                      onClick={() => a !== engine.area && runCommand(`J${a}`)}
+                      title={a === engine.area ? `Area ${a} (current)` : `Jump to area ${a} (J${a})`}
+                    >
+                      {a}
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="clear-btn" onClick={clearScreen} title="Clear screen (CLS) -- keeps your PNR and progress">
+                Clear screen
+              </button>
+            </div>
           </div>
           <div className="scroll-area" ref={scrollRef}>
             {lines.map((l, i) => (
@@ -397,8 +427,13 @@ export default function Page() {
             <button className={tab === "database" ? "tab active" : "tab"} onClick={() => setTab("database")}>
               DATABASE
             </button>
+            <button className={tab === "chat" ? "tab active" : "tab"} onClick={() => setTab("chat")}>
+              GLOBAL CHAT
+            </button>
           </div>
-          <div className="scroll-area">
+          <div className={tab === "chat" ? "scroll-area chat-mode" : "scroll-area"}>
+            {tab === "chat" && <GlobalChat />}
+
             {tab === "commands" && (
               <>
                 {REFERENCE.map((block) => (
@@ -630,7 +665,7 @@ export default function Page() {
               <>
                 <div className="practice-intro">
                   Work through these roughly in order -- 1&ndash;6 build up the individual commands, 7&ndash;9 are one
-                  real work order end to end. Each step checks itself off once you type it correctly. Stuck? Tap
+                  real work order end to end, and 10 shows how to juggle several bookings with work areas. Each step checks itself off once you type it correctly. Stuck? Tap
                   "Show hint" for the exact command.
                 </div>
                 {PRACTICE_TASKS.map((task) => {
@@ -703,7 +738,7 @@ export default function Page() {
       <footer className="disclosure">
         Everything here -- your PNR, saved bookings, and practice progress -- lives only in this browser's local
         storage. Nothing about your bookings is ever sent anywhere. Tap "Your Privacy" above for the full picture,
-        including what happens if you use the chat helper.
+        including the two features that do use a server: the chat helper and Global Chat.
       </footer>
 
       {badgeLevelId && (() => {
@@ -772,7 +807,9 @@ export default function Page() {
             <div className="modal-body">
               <p>This trainer was built just for you to practice on, so here's exactly what happens with your data:</p>
               <p><strong>Everything stays on your device:</strong> every command you type, every PNR you build or save, and your practice progress. It all lives in this browser's local storage and is never sent to any server, ever.</p>
-              <p><strong>The one exception -- the chat helper:</strong> if you use the "GDS Study Buddy" chat bubble, whatever you type there is sent through this site's server to Google's Gemini API to generate a reply. That's the only data that ever leaves your browser, and only when you choose to use it.</p>
+              <p><strong>Exception 1 -- the chat helper:</strong> if you use the "Amy" chat bubble, whatever you type there is sent through this site's server to Google's Gemini API to generate a reply.</p>
+              <p><strong>Exception 2 -- Global Chat:</strong> if you open the Global Chat tab, the username you pick and the messages you send are stored in a database and shown to everyone else using the trainer. Your PNRs and practice progress are never part of that.</p>
+              <p>Those are the only things that ever leave your browser, and only when you choose to use them.</p>
               <p><strong>Why:</strong> so you can practice, make mistakes, and get help without worrying about any of it being tracked, sold, or used against you. This space is yours.</p>
             </div>
             <button className="modal-close" onClick={() => setPrivacyOpen(false)}>Got it</button>

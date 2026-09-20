@@ -105,14 +105,58 @@ export interface EngineState {
   previousQuery?: LastQuery;
   activePNR: PNR;
   savedPNRs: Record<string, PNR>;
+  // Work areas, like a real Amadeus terminal (A-F). The top-level fields above
+  // always belong to the CURRENT area; every other area you've used is parked
+  // here, complete with its own PNR-in-progress and availability display.
+  area: string;
+  parked: Record<string, AreaSnapshot>;
 }
+
+export interface AreaSnapshot {
+  lastAvailability: FlightRow[];
+  lastQuery?: LastQuery;
+  previousQuery?: LastQuery;
+  activePNR: PNR;
+}
+
+export const WORK_AREAS = ["A", "B", "C", "D", "E", "F"];
 
 export function newState(): EngineState {
   return {
     lastAvailability: [],
     activePNR: emptyPNR(),
     savedPNRs: {},
+    area: "A",
+    parked: {},
   };
+}
+
+// Older saved sessions (before work areas existed) won't have area/parked.
+export function normalizeState(raw: Partial<EngineState> | undefined): EngineState {
+  const base = newState();
+  if (!raw) return base;
+  return {
+    ...base,
+    ...raw,
+    activePNR: raw.activePNR ?? base.activePNR,
+    savedPNRs: raw.savedPNRs ?? {},
+    area: raw.area && WORK_AREAS.includes(raw.area) ? raw.area : "A",
+    parked: raw.parked ?? {},
+  };
+}
+
+export function pnrHasContent(p: PNR): boolean {
+  return (
+    p.names.length > 0 ||
+    p.segments.length > 0 ||
+    p.contacts.length > 0 ||
+    p.remarks.length > 0 ||
+    p.osi.length > 0 ||
+    p.seatAssignments.length > 0 ||
+    !!p.frequentFlyer ||
+    !!p.ticketing ||
+    !!p.receivedFrom
+  );
 }
 
 function emptyPNR(): PNR {
@@ -462,8 +506,11 @@ function helpTopic(topic: string): string[] {
     OS: "OS <text> -- Other Service Information (displays as an OSI element).",
     FFN: "FFN <CARRIER-NUMBER> -- attach a frequent flyer number. e.g. FFN BA-1234567",
     RT: "RT -- redisplay the active PNR. RT<LOCATOR> -- retrieve a saved PNR.",
-    ER: "ER -- End & Retrieve: saves the PNR, hands back a record locator. Requires the 5 mandatory elements.",
+    ER: "ER -- End & Retrieve: saves the PNR, hands back a record locator, and leaves the PNR open on screen. Requires the 5 mandatory elements.",
+    ET: "ET -- End Transaction: saves the PNR (same 5 mandatory elements as ER) and clears the work area so you can start the next booking straight away.",
     IG: "IG -- ignore/discard the active PNR without saving.",
+    JA: "JA..JF -- jump to work area A-F. Each area holds its own PNR in progress, so you can work several bookings side by side. JO shows what's in each area.",
+    JO: "JO -- work area status: which of areas A-F are empty, in progress, or holding a saved PNR.",
     XE: "XE<n> -- cancel element number n, using the numbering shown by RT.",
     DAC: "DAC<code> -- decode a city/airport code to its name.",
     DAN: "DAN <text> -- encode a city name to its code.",
@@ -518,6 +565,8 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       seatAssignments: [...state.activePNR.seatAssignments],
     },
     savedPNRs: { ...state.savedPNRs },
+    area: state.area ?? "A",
+    parked: { ...(state.parked ?? {}) },
   };
 
   if (!cmd) return { lines: [], state: s };
@@ -551,8 +600,10 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "XE<n>                         CANCEL ELEMENT NUMBER n",
       "RT                            DISPLAY ACTIVE PNR",
       "RT<LOCATOR>                   RETRIEVE A SAVED PNR",
-      "ER                            END TRANSACTION -- SAVE (5 mandatory elements)",
+      "ER                            END TRANSACTION & REDISPLAY -- SAVE, PNR STAYS OPEN",
+      "ET                            END TRANSACTION -- SAVE, THEN CLEAR THE AREA",
       "IG                            IGNORE / CLEAR ACTIVE PNR",
+      "JA..JF / JO                   JUMP TO WORK AREA A-F / SHOW AREA STATUS",
       "DAC<CODE> / DAN <TEXT>        DECODE / ENCODE A CITY",
       "CLS                           CLEAR SCREEN (trainer convenience only)",
       "HE <TOPIC>                    HELP ON ONE ENTRY, e.g. HE TKTL",
@@ -962,15 +1013,27 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       out.push(`NOT FOUND - RECORD LOCATOR ${loc}`);
       return { lines: out, state: s };
     }
+    // Real systems won't let a retrieve silently wipe a booking you're still
+    // building. Unsaved work in this area must be ended (ER/ET) or ignored (IG)
+    // first -- or just keep it and retrieve in another area (JB, JC...).
+    if (pnrHasContent(s.activePNR) && !s.activePNR.locator) {
+      out.push("ENTRY NOT VALID - THIS AREA HAS AN UNSAVED PNR IN PROGRESS");
+      out.push("  ER/ET TO SAVE IT, IG TO DISCARD IT, OR JUMP TO A FREE AREA (E.G. JB)");
+      return { lines: out, state: s };
+    }
     s.activePNR = found;
     out.push(...renderPNR(found));
     return { lines: out, state: s };
   }
 
-  // ER - end transact and retrieve. Real Amadeus requires 5 mandatory
-  // elements before it will save: name, segment, a contact, a ticketing
-  // arrangement, and Received From.
-  if (cmd === "ER") {
+  // ER / ET - end transaction. Real Amadeus requires 5 mandatory elements
+  // before it will save: name, segment, a contact, a ticketing arrangement,
+  // and Received From.
+  //   ER = end transaction AND REDISPLAY: PNR saved, stays on screen so you can
+  //        keep working on it.
+  //   ET = end transaction: PNR saved and the area is wiped, ready for the next
+  //        booking. No IG needed.
+  if (cmd === "ER" || cmd === "ET") {
     const missing: string[] = [];
     if (s.activePNR.names.length === 0) missing.push("NAME (NM)");
     if (s.activePNR.segments.length === 0) missing.push("SEGMENT (SS)");
@@ -986,14 +1049,64 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     s.activePNR.locator = locator;
     s.savedPNRs[locator] = s.activePNR;
     out.push(`END OF TRANSACTION COMPLETE - ${locator}`);
-    out.push(...renderPNR(s.activePNR));
+    if (cmd === "ET") {
+      out.push(`PNR ${locator} SAVED. AREA ${s.area} IS CLEAR FOR A NEW BOOKING.`);
+      s.activePNR = emptyPNR();
+    } else {
+      out.push(...renderPNR(s.activePNR));
+      out.push(`(PNR STILL OPEN IN AREA ${s.area} - ET WHEN DONE, OR IG TO CLEAR THE AREA)`);
+    }
     return { lines: out, state: s };
   }
 
   // IG - ignore
   if (cmd === "IG") {
     s.activePNR = emptyPNR();
-    out.push("IGNORED - ACTIVE PNR CLEARED");
+    out.push(`IGNORED - AREA ${s.area} CLEARED`);
+    return { lines: out, state: s };
+  }
+
+  // JA..JF - jump to another work area. Each keeps its own PNR in progress.
+  const jMatch = cmd.match(/^J([A-F])$/);
+  if (jMatch) {
+    const target = jMatch[1];
+    if (target === s.area) {
+      out.push(`ALREADY IN AREA ${target}`);
+      return { lines: out, state: s };
+    }
+    s.parked[s.area] = {
+      lastAvailability: s.lastAvailability,
+      lastQuery: s.lastQuery,
+      previousQuery: s.previousQuery,
+      activePNR: s.activePNR,
+    };
+    const next = s.parked[target];
+    delete s.parked[target];
+    s.area = target;
+    s.lastAvailability = next?.lastAvailability ?? [];
+    s.lastQuery = next?.lastQuery;
+    s.previousQuery = next?.previousQuery;
+    s.activePNR = next?.activePNR ?? emptyPNR();
+    out.push(`AREA ${target} ACTIVE`);
+    if (pnrHasContent(s.activePNR)) out.push(...renderPNR(s.activePNR));
+    else out.push(" (EMPTY AREA - READY FOR A NEW BOOKING)");
+    return { lines: out, state: s };
+  }
+
+  // JO - work area status
+  if (cmd === "JO") {
+    out.push("WORK AREAS ---------------------------------");
+    WORK_AREAS.forEach((a) => {
+      const pnr = a === s.area ? s.activePNR : s.parked[a]?.activePNR;
+      const mark = a === s.area ? "*" : " ";
+      if (!pnr || !pnrHasContent(pnr)) {
+        out.push(` ${a}${mark} ${a === s.area ? "ACTIVE  " : "        "} EMPTY`);
+      } else {
+        const n = getElements(pnr).length;
+        const st = pnr.locator ? `RLOC ${pnr.locator}` : "UNSAVED";
+        out.push(` ${a}${mark} ${a === s.area ? "ACTIVE  " : "        "} ${n} ELEMENT(S) - ${st}`);
+      }
+    });
     return { lines: out, state: s };
   }
 

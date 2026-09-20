@@ -49,6 +49,7 @@ BUILDING THE PNR (5 mandatory elements before ER will save it)
 - TKOK (no time limit) or TKTL<ddMMM>/<hhmm> (e.g. TKTL20JAN/1700) -- ticketing arrangement.
 - RF <name or initials> -- Received From, the agent's signature. Mandatory.
 - ER refuses to save and lists exactly which of the 5 mandatory elements (name, segment, contact, ticketing, RF) are still missing.
+- ER = End & Redisplay: saves the PNR and leaves it open on screen (so anything typed next modifies that same booking). ET = End Transaction: saves the PNR and then clears the work area, so the next booking starts clean.
 
 OPTIONAL ELEMENTS
 - RM <text> -- remark.
@@ -63,13 +64,14 @@ MANAGING THE PNR
 - RT<LOCATOR> -- retrieve a previously saved PNR by its 6-character locator (no punctuation between RT and the locator -- that's real Amadeus syntax).
 - XE<n> -- cancel element number n, using the numbers shown by RT.
 - IG -- discard the active PNR without saving.
+- JA, JB, JC, JD, JE, JF -- jump to work area A-F. Each area keeps its own PNR in progress and its own availability display, so a learner can work several bookings side by side. JO shows the status of every area. The trainer won't let RT<LOCATOR> overwrite an unsaved PNR: end it (ER/ET), ignore it (IG), or retrieve in a different area.
 - DAC<code> -- decode a city/airport code to its name. DAN <text> -- the reverse, name to code.
 
 OTHER TRAINER FEATURES (not real Amadeus commands -- mention only if relevant)
 - CLS clears the visible screen without touching the PNR.
 - The "Reset Session" button in the top bar wipes everything (PNR, history, practice progress) after confirming.
-- The lower panel has three tabs: Practice Tasks (guided exercises with hidden hints), Command List (quick reference), and Database (every saved PNR, dashboard-style).
-- Everything -- PNR data, saved bookings, practice progress -- is stored only in the learner's own browser (localStorage). Nothing about their bookings is sent anywhere. Chat messages sent to you do leave the browser (they go through this site's server to Google's Gemini API) -- if asked, be upfront about that distinction.
+- The lower panel has tabs: Practice Tasks (guided exercises with hidden hints), Command List (quick reference), Flashcards, Quiz, Database (every saved PNR, dashboard-style), and Global Chat (a public room where learners pick a one-time username and chat with each other -- those messages are stored on a server and visible to everyone).
+- Everything -- PNR data, saved bookings, practice progress -- is stored only in the learner's own browser (localStorage). Nothing about their bookings is sent anywhere. Chat messages sent to you do leave the browser (they go through this site's server to Google's Gemini API), and Global Chat messages are stored in a shared database -- if asked, be upfront about that distinction.
 
 WHEN A COMMAND FAILS
 Walk through the likely cause using the rules above (wrong month code, selling from a line that doesn't exist yet without running AN first, missing a mandatory element before ER, using AP instead of APE for an email, etc.) rather than guessing randomly.
