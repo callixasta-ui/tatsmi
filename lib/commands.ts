@@ -1,21 +1,51 @@
 // A learning-purpose simulator of Amadeus Basic Access ("cryptic") commands.
 // Entry syntax, mandatory-element rules, and screen shapes are modeled on
-// real Amadeus cryptic entries (AN/SS/NM/AP-family/TK/RF/RT/XE/DAC-DAN/
-// FXP/SM-ST, etc). It's a simplified training subset, not the full system --
-// see the in-app HE listing for what's covered. All data stays local;
-// nothing here is connected to any live GDS or airline inventory.
+// real Amadeus cryptic entries (AN/SN/TN/DO/AC/SS/NM/AP-family/TK/RF/RT/XE/
+// DAC-DAN/FXP/SM-ST, etc), including the flight-information-display family
+// (availability / schedule / timetable / flight info) from STI handout
+// TH2106. It's a simplified training subset, not the full system -- see the
+// in-app HE listing for what's covered. All data stays local; nothing here
+// is connected to any live GDS or airline inventory.
+
+export interface ClassStatus {
+  code: string;
+  status: string; // "1".."9" open seats | "0" open, waitlist-only
+}
 
 export interface FlightRow {
   line: number;
   carrier: string;
   flightNo: string;
-  bookClass: string;
-  status: string; // "C" closed | "0" open, waitlist-only | "1".."9" open seats
+  classes: ClassStatus[];
   depTime: string;
   arrTime: string;
   origin: string;
+  originTerm: string;
   dest: string;
-  date: string;
+  destTerm: string;
+  date: string; // ddMON
+  stops: number;
+  aircraft: string;
+  elapsed: string; // "H:MM"
+  access: string; // "/" full | "." sell | "*" direct | "" standard
+}
+
+export interface TimetableRow {
+  line: number;
+  carrier: string;
+  flightNo: string;
+  dow: string; // e.g. "D", "X2", "2346"
+  depTime: string;
+  arrTime: string;
+  origin: string;
+  originTerm: string;
+  dest: string;
+  destTerm: string;
+  stops: number;
+  effective: string;
+  discontinue: string;
+  aircraft: string;
+  elapsed: string;
 }
 
 export interface Segment {
@@ -60,8 +90,19 @@ export interface PNR {
   seatAssignments: SeatAssignment[];
 }
 
+export interface LastQuery {
+  kind: "AN" | "SN";
+  dateCode: string; // ddMON
+  origin: string;
+  dest: string;
+  quals: string[]; // raw "/X..." tokens, without the slash
+  afterHour?: number;
+}
+
 export interface EngineState {
   lastAvailability: FlightRow[];
+  lastQuery?: LastQuery;
+  previousQuery?: LastQuery;
   activePNR: PNR;
   savedPNRs: Record<string, PNR>;
 }
@@ -79,6 +120,8 @@ function emptyPNR(): PNR {
 }
 
 const CARRIERS = ["BA", "LH", "AF", "TG", "SQ", "EK", "QF", "CX"];
+const AIRCRAFT = ["320", "321", "332", "333", "343", "359", "388", "744", "772", "773", "787"];
+const ACCESS_INDICATORS = ["/", ".", "*", ""]; // full / sell / direct / standard
 
 function seededRand(seed: string, i: number) {
   let h = 0;
@@ -87,35 +130,171 @@ function seededRand(seed: string, i: number) {
   return h;
 }
 
-function buildAvailability(dateCode: string, origin: string, dest: string): FlightRow[] {
+// All classes of service the demo can generate, tagged with the cabin they
+// belong to (F/C/W/M), matching the /K option table in the handout.
+const ALL_CLASSES: { code: string; cabin: "F" | "C" | "W" | "M" }[] = [
+  { code: "F", cabin: "F" },
+  { code: "A", cabin: "F" },
+  { code: "J", cabin: "C" },
+  { code: "C", cabin: "C" },
+  { code: "D", cabin: "C" },
+  { code: "W", cabin: "W" },
+  { code: "E", cabin: "W" },
+  { code: "Y", cabin: "M" },
+  { code: "B", cabin: "M" },
+  { code: "M", cabin: "M" },
+  { code: "H", cabin: "M" },
+  { code: "Q", cabin: "M" },
+  { code: "K", cabin: "M" },
+];
+const CABIN_LETTERS = ["F", "C", "W", "M"];
+
+interface BaseFlight {
+  carrier: string;
+  flightNo: string;
+  depTime: string;
+  arrTime: string;
+  originTerm: string;
+  destTerm: string;
+  stops: number;
+  aircraft: string;
+  elapsed: string;
+  access: string;
+}
+
+// Deterministic "physical" details for one carrier+flightNo+date+route --
+// used by AN/SN (per line) *and* by DO (direct entry), so looking a flight
+// straight up with DO gives the same times/equipment you saw on the AN
+// display it came from.
+function baseFlightDetails(carrier: string, flightNo: string, dateCode: string, origin: string, dest: string): BaseFlight {
+  const seed = carrier + flightNo + dateCode + origin + dest;
+  const r = seededRand(seed, 0);
+  const depHour = (r >>> 9) % 22;
+  const depMin = (r >>> 4) % 2 === 0 ? "00" : "30";
+  const durationH = 1 + ((r >>> 12) % 12);
+  const durationM = (r >>> 2) % 2 === 0 ? 0 : 30;
+  const arrTotalMin = depHour * 60 + parseInt(depMin, 10) + durationH * 60 + durationM;
+  const arrHour = Math.floor(arrTotalMin / 60) % 24;
+  const arrMin = arrTotalMin % 60;
+  return {
+    carrier,
+    flightNo,
+    depTime: `${String(depHour).padStart(2, "0")}${depMin}`,
+    arrTime: `${String(arrHour).padStart(2, "0")}${String(arrMin).padStart(2, "0")}`,
+    originTerm: String(1 + (r % 3)),
+    destTerm: String(1 + ((r >>> 6) % 3)),
+    stops: 0, // this demo models non-stop flights only
+    aircraft: AIRCRAFT[(r >>> 8) % AIRCRAFT.length],
+    elapsed: `${durationH}:${String(durationM).padStart(2, "0")}`,
+    access: ACCESS_INDICATORS[(r >>> 14) % ACCESS_INDICATORS.length],
+  };
+}
+
+function classesForFlight(carrier: string, flightNo: string, dateCode: string): ClassStatus[] {
+  const seed = "CLS" + carrier + flightNo + dateCode;
+  const out: ClassStatus[] = [];
+  ALL_CLASSES.forEach((c, i) => {
+    const r = seededRand(seed, i);
+    if (r % 10 < 8) {
+      // included on this flight
+      const seatCount = (r >>> 4) % 10;
+      out.push({ code: c.code, status: String(seatCount) });
+    }
+  });
+  return out;
+}
+
+export interface AvailQualifiers {
+  carrierFilter?: string;
+  classFilter?: string;
+  cabinFilter?: "F" | "C" | "W" | "M";
+  connectingPoint?: string;
+  afterHour?: number;
+  notes: string[];
+}
+
+function parseQualifiers(tokens: string[]): AvailQualifiers {
+  const q: AvailQualifiers = { notes: [] };
+  tokens.forEach((tok) => {
+    const opt = tok[0];
+    const val = tok.slice(1);
+    if (opt === "A" && val) q.carrierFilter = val;
+    else if (opt === "C" && val) q.classFilter = val[0];
+    else if (opt === "K" && val && CABIN_LETTERS.includes(val[0])) q.cabinFilter = val[0] as "F" | "C" | "W" | "M";
+    else if (opt === "X" && val) {
+      q.connectingPoint = val;
+      q.notes.push(`/X${val} -- CONNECTING-POINT FILTER NOT MODELED IN THIS DEMO (SHOWN UNFILTERED)`);
+    } else q.notes.push(`UNRECOGNIZED OPTION "/${tok}" -- IGNORED`);
+  });
+  return q;
+}
+
+function buildAvailability(dateCode: string, origin: string, dest: string, q: AvailQualifiers = { notes: [] }): FlightRow[] {
   const rows: FlightRow[] = [];
+  let line = 1;
   for (let i = 1; i <= 8; i++) {
     const r = seededRand(dateCode + origin + dest, i);
     const carrier = CARRIERS[r % CARRIERS.length];
     const flightNo = String(100 + (r % 800));
-    const classes = ["Y", "B", "M", "H", "Q", "K"];
-    const bookClass = classes[(r >>> 3) % classes.length];
-    const seatCount = (r >>> 6) % 10;
-    const closedBit = (r >>> 15) & 1;
-    // 0 seats splits into two real-world cases: class not offered at all
-    // ("C", closed) vs. class offered but sold out -- which is where a
-    // real system lets you sell into a waitlist (status "0" here, HL once sold).
-    const status = seatCount === 0 ? (closedBit ? "C" : "0") : String(seatCount);
-    const depHour = (r >>> 9) % 22;
-    const depMin = (r >>> 4) % 2 === 0 ? "00" : "30";
-    const durationH = 1 + ((r >>> 12) % 12);
-    const arrHour = (depHour + durationH) % 24;
+    if (q.carrierFilter && carrier !== q.carrierFilter.toUpperCase()) continue;
+
+    const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
+    if (q.afterHour !== undefined) {
+      const depHour = parseInt(base.depTime.slice(0, 2), 10);
+      if (depHour < Math.max(0, q.afterHour - 1)) continue;
+    }
+
+    let classes = classesForFlight(carrier, flightNo, dateCode);
+    if (q.cabinFilter) classes = classes.filter((c) => ALL_CLASSES.find((a) => a.code === c.code)?.cabin === q.cabinFilter);
+    if (q.classFilter) classes = classes.filter((c) => c.code === q.classFilter);
+    if (classes.length === 0) continue; // nothing sellable under these filters, real AN just skips the line
+
+    rows.push({
+      line: line++,
+      carrier,
+      flightNo,
+      classes,
+      depTime: base.depTime,
+      arrTime: base.arrTime,
+      origin,
+      originTerm: base.originTerm,
+      dest,
+      destTerm: base.destTerm,
+      date: dateCode,
+      stops: base.stops,
+      aircraft: base.aircraft,
+      elapsed: base.elapsed,
+      access: base.access,
+    });
+  }
+  return rows;
+}
+
+function buildTimetable(dateCode: string, origin: string, dest: string): TimetableRow[] {
+  const rows: TimetableRow[] = [];
+  const DOW_PATTERNS = ["D", "1234567", "X2", "X6", "2346", "1357", "X7"];
+  for (let i = 1; i <= 6; i++) {
+    const r = seededRand("TN" + dateCode + origin + dest, i);
+    const carrier = CARRIERS[r % CARRIERS.length];
+    const flightNo = String(100 + (r % 800));
+    const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
+    const eff = shiftDate(dateCode, -((r >>> 10) % 120));
     rows.push({
       line: i,
       carrier,
       flightNo,
-      bookClass,
-      status,
-      depTime: `${String(depHour).padStart(2, "0")}${depMin}`,
-      arrTime: `${String(arrHour).padStart(2, "0")}${depMin}`,
+      dow: DOW_PATTERNS[(r >>> 5) % DOW_PATTERNS.length],
+      depTime: base.depTime,
+      arrTime: base.arrTime,
       origin,
+      originTerm: base.originTerm,
       dest,
-      date: dateCode,
+      destTerm: base.destTerm,
+      stops: base.stops,
+      effective: eff,
+      discontinue: "---",
+      aircraft: base.aircraft,
+      elapsed: base.elapsed,
     });
   }
   return rows;
@@ -138,6 +317,7 @@ export interface CmdResult {
 }
 
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const DOW_CODES = ["SU","MO","TU","WE","TH","FR","SA"];
 
 const CITY_TABLE: Record<string, string> = {
   LON: "LONDON, UNITED KINGDOM",
@@ -156,7 +336,57 @@ const CITY_TABLE: Record<string, string> = {
   DPS: "DENPASAR/BALI, INDONESIA",
   ICN: "SEOUL, SOUTH KOREA",
   DOH: "DOHA, QATAR",
+  BOM: "MUMBAI, INDIA",
+  KWI: "KUWAIT, KUWAIT",
 };
+
+const COUNTRY_CODE: Record<string, string> = {
+  LON: "GB", BKK: "TH", NYC: "US", HKG: "HK", SIN: "SG", PAR: "FR", MNL: "PH",
+  CEB: "PH", TYO: "JP", SYD: "AU", KUL: "MY", HKT: "TH", DXB: "AE", DPS: "ID",
+  ICN: "KR", DOH: "QA", BOM: "IN", KWI: "KW",
+};
+
+function cityName(code: string): string {
+  return CITY_TABLE[code] ? CITY_TABLE[code].split(",")[0] : code;
+}
+function countryCode(code: string): string {
+  return COUNTRY_CODE[code] ?? "XX";
+}
+
+// ---- date helpers (dd+MON, year inferred as the nearest same-or-future
+// occurrence of that date relative to "today", same convention Amadeus
+// uses when you omit the year) ----
+function resolveDate(dateCode: string): Date {
+  const dd = parseInt(dateCode.slice(0, 2), 10);
+  const mon = dateCode.slice(2);
+  const monIdx = MONTHS.indexOf(mon);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let d = new Date(today.getFullYear(), monIdx, dd);
+  if (d < today) d = new Date(today.getFullYear() + 1, monIdx, dd);
+  return d;
+}
+
+function dateCodeOf(d: Date): string {
+  return `${String(d.getDate()).padStart(2, "0")}${MONTHS[d.getMonth()]}`;
+}
+
+function shiftDate(dateCode: string, days: number): string {
+  const d = resolveDate(dateCode);
+  d.setDate(d.getDate() + days);
+  return dateCodeOf(d);
+}
+
+function daysBetweenToday(dateCode: string): number {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = resolveDate(dateCode);
+  return Math.round((d.getTime() - today.getTime()) / 86400000);
+}
+
+function dowOf(dateCode: string): string {
+  return DOW_CODES[resolveDate(dateCode).getDay()];
+}
 
 // Unified, numbered element list -- mirrors how a real PNR shows every
 // element (names, segments, contacts, remarks, OSI, FFN, seat assignments)
@@ -218,8 +448,11 @@ function seatMapRows(seg: Segment): { row: number; seats: { seat: string; occupi
 
 function helpTopic(topic: string): string[] {
   const t: Record<string, string> = {
-    AN: "AN<ddMMM><ORIG><DEST> -- air availability. e.g. AN15DECLONBKK",
-    SN: "SN<ddMMM><ORIG><DEST> -- schedule display (same data as AN here).",
+    AN: "AN<ddMMM><ORIG><DEST>[<HHMM>|<HHA>][/A<CX>][/C<CLS>][/K<CABIN>][/X<PT>] -- air availability. Options: /A airline, /C class, /K cabin (F/C/W/M), /X connecting point, HHMM or HHA = flights from ~1hr before that time. e.g. AN15DECLONBKK, AN18AUGHKGSIN0900, AN18AUGHKGSIN09A/CQ",
+    SN: "SN<ddMMM><ORIG><DEST>[...] -- schedule display. Same entry & options as AN (shows all flights regardless of open availability).",
+    TN: "TN<ddMMM><ORIG><DEST> -- timetable: every flight on that city pair for a 7-day period, with days of operation.",
+    DO: "DO<n> (follow-up to an AN/SN line) OR DO<CX><FLT>/<ddMMM><ORIG><DEST> (direct entry) -- detailed flight information for one flight.",
+    AC: "AC<ddMMM> change date | AC<n>/AC-<n> shift n days | MN move to next day | MY move to previous day | MPAN return to the previous availability display.",
     SS: "SS<n><CLASS><LINE> -- sell n seats, class, from an availability line. e.g. SS1Y1",
     NM: "NM<n><LAST>/<FIRST> <TITLE> -- add a passenger name. e.g. NM1SMITH/JOHN MR",
     AP: "AP <phone> | APM <mobile> | APH <home> | APE <email> -- contact elements.",
@@ -242,12 +475,39 @@ function helpTopic(topic: string): string[] {
   return t[topic] ? [t[topic]] : [`NO HELP AVAILABLE FOR "${topic}" -- TYPE HE FOR THE FULL LIST`];
 }
 
+function classesLine(classes: ClassStatus[]): string {
+  return classes.map((c) => `${c.code}${c.status}`).join(" ");
+}
+
+function renderAvailBlock(kind: "AN" | "SN", dateCode: string, origin: string, dest: string, rows: FlightRow[], notes: string[]): string[] {
+  const out: string[] = [];
+  out.push(
+    `** AMADEUS ${kind === "SN" ? "SCHEDULE" : "AVAILABILITY"} - ${kind} ** ${dest} ${cityName(dest)}.${countryCode(dest)}   ` +
+      `${daysBetweenToday(dateCode)} ${dowOf(dateCode)} ${dateCode} 0000`
+  );
+  notes.forEach((n) => out.push(`** ${n} **`));
+  if (rows.length === 0) {
+    out.push(" NO FLIGHTS MATCH THIS AVAILABILITY REQUEST");
+    return out;
+  }
+  rows.forEach((r) => {
+    out.push(
+      ` ${String(r.line).padStart(2, " ")} ${r.carrier} ${pad(r.flightNo, 4)} ${classesLine(r.classes)}` +
+        ` /${r.origin}${r.originTerm}  ${r.dest}${r.destTerm}  ${r.depTime}  ${r.arrTime}  ` +
+        `E${r.stops}${r.access}${r.aircraft}  ${r.elapsed}`
+    );
+  });
+  return out;
+}
+
 export function processCommand(raw: string, state: EngineState): CmdResult {
   const input = raw.trim();
   const cmd = input.toUpperCase();
   const out: string[] = [];
   const s: EngineState = {
     lastAvailability: state.lastAvailability,
+    lastQuery: state.lastQuery,
+    previousQuery: state.previousQuery,
     activePNR: {
       ...state.activePNR,
       names: [...state.activePNR.names],
@@ -271,7 +531,12 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     }
     out.push(
       "AVAILABLE ENTRIES ------------------------------",
-      "AN / SN <ddMMM><ORIG><DEST>   AVAILABILITY / SCHEDULE",
+      "AN / SN <ddMMM><ORIG><DEST>   AVAILABILITY / SCHEDULE (see HE AN for options)",
+      "AN...*...                     DUAL CITY PAIR (OUTBOUND*INBOUND) AVAILABILITY",
+      "AC<ddMMM> / AC<n> / AC-<n>    CHANGE THE DATE ON THE LAST AVAILABILITY DISPLAY",
+      "MN / MY / MPAN                MOVE NEXT DAY / MOVE YESTERDAY / PREVIOUS DISPLAY",
+      "TN <ddMMM><ORIG><DEST>        TIMETABLE (7-DAY FLIGHT FREQUENCY)",
+      "DO<n> / DO<CX><FLT>/<ddMMM><ORIG><DEST>   FLIGHT INFORMATION DISPLAY",
       "SS<n><CLASS><LINE>            SELL SEGMENT",
       "NM<n><LAST>/<FIRST> <TTL>     ADD NAME",
       "AP / APM / APH / APE <text>   CONTACT (PHONE/MOBILE/HOME/EMAIL)",
@@ -296,25 +561,195 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // AN / SN command: AN15DECLONBKK
-  const anMatch = cmd.match(/^(AN|SN)(\d{2})([A-Z]{3})([A-Z]{3})([A-Z]{3})$/);
-  if (anMatch) {
-    const [, kind, dd, mon, origin, dest] = anMatch;
+  // ---- AN / SN, including dual-city-pair (AN<leg1>*<leg2>) and options ----
+  if (/^(AN|SN)\d/.test(cmd)) {
+    const kind = cmd.slice(0, 2) as "AN" | "SN";
+    const rest = cmd.slice(2);
+    const legRe = /^(\d{2})([A-Z]{3})([A-Z]{3})([A-Z]{3})(\d{4}|\d{2}[AP])?((?:\/[A-Z0-9]+)*)$/;
+
+    function parseLeg(legStr: string) {
+      const m = legStr.match(legRe);
+      if (!m) return null;
+      const [, dd, mon, origin, dest, timeQual, qualStr] = m;
+      if (!MONTHS.includes(mon)) return "BADMONTH" as const;
+      let afterHour: number | undefined;
+      if (timeQual) {
+        if (/^\d{4}$/.test(timeQual)) afterHour = parseInt(timeQual.slice(0, 2), 10);
+        else afterHour = parseInt(timeQual.slice(0, 2), 10) + (timeQual.endsWith("P") ? 12 : 0);
+      }
+      const quals = qualStr ? qualStr.split("/").filter(Boolean) : [];
+      return { dateCode: `${dd}${mon}`, origin, dest, quals, afterHour };
+    }
+
+    if (rest.includes("*")) {
+      const [leg1Str, leg2Str] = rest.split("*");
+      const leg1 = parseLeg(leg1Str);
+      const leg2 = parseLeg(leg2Str);
+      if (!leg1 || !leg2 || leg1 === "BADMONTH" || leg2 === "BADMONTH") {
+        out.push("FORMAT INVALID - DUAL CITY PAIR ENTRY, e.g. AN23SEPMNLHKG/ACX*26SEPHKGSIN/ASQ");
+        return { lines: out, state: s };
+      }
+      const q1 = parseQualifiers(leg1.quals);
+      if (leg1.afterHour !== undefined) q1.afterHour = leg1.afterHour;
+      const q2 = parseQualifiers(leg2.quals);
+      if (leg2.afterHour !== undefined) q2.afterHour = leg2.afterHour;
+
+      const rows1 = buildAvailability(leg1.dateCode, leg1.origin, leg1.dest, q1);
+      const rows2raw = buildAvailability(leg2.dateCode, leg2.origin, leg2.dest, q2);
+      const offset = rows1.length;
+      const rows2 = rows2raw.map((r) => ({ ...r, line: r.line + offset }));
+
+      out.push("OUTBOUND FLIGHTS BEGIN WITH LINE NO. 1");
+      out.push(...renderAvailBlock(kind, leg1.dateCode, leg1.origin, leg1.dest, rows1, q1.notes));
+      out.push("");
+      out.push(`INBOUND FLIGHTS BEGIN WITH LINE NO. ${offset + 1}`);
+      out.push(...renderAvailBlock(kind, leg2.dateCode, leg2.origin, leg2.dest, rows2, q2.notes));
+
+      s.lastAvailability = [...rows1, ...rows2];
+      s.previousQuery = s.lastQuery;
+      s.lastQuery = { kind, dateCode: leg1.dateCode, origin: leg1.origin, dest: leg1.dest, quals: leg1.quals, afterHour: leg1.afterHour };
+      return { lines: out, state: s };
+    }
+
+    const leg = parseLeg(rest);
+    if (leg === "BADMONTH") {
+      out.push("INVALID MONTH - USE 3 LETTER CODE (JAN,FEB,...)");
+      return { lines: out, state: s };
+    }
+    if (!leg) {
+      out.push(`FORMAT INVALID OR UNKNOWN ENTRY: ${cmd}  -  TYPE HE AN FOR HELP`);
+      return { lines: out, state: s };
+    }
+    const q = parseQualifiers(leg.quals);
+    if (leg.afterHour !== undefined) q.afterHour = leg.afterHour;
+    const rows = buildAvailability(leg.dateCode, leg.origin, leg.dest, q);
+    out.push(...renderAvailBlock(kind, leg.dateCode, leg.origin, leg.dest, rows, q.notes));
+    s.lastAvailability = rows;
+    s.previousQuery = s.lastQuery;
+    s.lastQuery = { kind, dateCode: leg.dateCode, origin: leg.origin, dest: leg.dest, quals: leg.quals, afterHour: leg.afterHour };
+    return { lines: out, state: s };
+  }
+
+  // ---- AC -- Availability Change ----
+  const acMatch = cmd.match(/^AC(-?\d+|\d{2}[A-Z]{3})$/);
+  if (acMatch || cmd === "MN" || cmd === "MY" || cmd === "MPAN") {
+    if (!s.lastQuery) {
+      out.push("NO PRIOR AVAILABILITY DISPLAY TO CHANGE - ENTER AN OR SN FIRST");
+      return { lines: out, state: s };
+    }
+    if (cmd === "MPAN") {
+      if (!s.previousQuery) {
+        out.push("NO PREVIOUS AVAILABILITY DISPLAY ON FILE");
+        return { lines: out, state: s };
+      }
+      const q = s.previousQuery;
+      const qual = parseQualifiers(q.quals);
+      if (q.afterHour !== undefined) qual.afterHour = q.afterHour;
+      const rows = buildAvailability(q.dateCode, q.origin, q.dest, qual);
+      out.push(...renderAvailBlock(q.kind, q.dateCode, q.origin, q.dest, rows, qual.notes));
+      s.lastAvailability = rows;
+      s.previousQuery = s.lastQuery;
+      s.lastQuery = q;
+      return { lines: out, state: s };
+    }
+
+    const lq = s.lastQuery;
+    let newDateCode: string;
+    if (cmd === "MN") newDateCode = shiftDate(lq.dateCode, 1);
+    else if (cmd === "MY") newDateCode = shiftDate(lq.dateCode, -1);
+    else {
+      const val = acMatch![1];
+      if (/^-?\d+$/.test(val)) newDateCode = shiftDate(lq.dateCode, parseInt(val, 10));
+      else {
+        if (!MONTHS.includes(val.slice(2))) {
+          out.push("INVALID MONTH - USE 3 LETTER CODE (JAN,FEB,...)");
+          return { lines: out, state: s };
+        }
+        newDateCode = val;
+      }
+    }
+    const qual = parseQualifiers(lq.quals);
+    if (lq.afterHour !== undefined) qual.afterHour = lq.afterHour;
+    const rows = buildAvailability(newDateCode, lq.origin, lq.dest, qual);
+    out.push(...renderAvailBlock(lq.kind, newDateCode, lq.origin, lq.dest, rows, qual.notes));
+    s.lastAvailability = rows;
+    s.previousQuery = lq;
+    s.lastQuery = { ...lq, dateCode: newDateCode };
+    return { lines: out, state: s };
+  }
+
+  // ---- TN -- Timetable Display ----
+  const tnMatch = cmd.match(/^TN(\d{2})([A-Z]{3})([A-Z]{3})([A-Z]{3})$/);
+  if (tnMatch) {
+    const [, dd, mon, origin, dest] = tnMatch;
     if (!MONTHS.includes(mon)) {
       out.push("INVALID MONTH - USE 3 LETTER CODE (JAN,FEB,...)");
       return { lines: out, state: s };
     }
     const dateCode = `${dd}${mon}`;
-    const rows = buildAvailability(dateCode, origin, dest);
-    s.lastAvailability = rows;
-    out.push(`** AMADEUS ${kind === "SN" ? "SCHEDULE" : "AVAILABILITY"} - ${kind} ** ${origin}-${dest} ${dateCode}`);
-    out.push(` ${dateCode}  ${origin}/${dest}  ${rows.length} FLIGHTS`);
+    const endCode = shiftDate(dateCode, 6);
+    const d = resolveDate(dateCode);
+    const yy = String(d.getFullYear()).slice(-2);
+    const rows = buildTimetable(dateCode, origin, dest);
+    out.push(`${origin}${dest}`);
+    out.push(`** AMADEUS - TN ** ${dest} ${cityName(dest)}.${countryCode(dest)}   ${dateCode}${yy} ${endCode}${yy}`);
     rows.forEach((r) => {
       out.push(
-        ` ${String(r.line).padStart(2, " ")} ${r.carrier} ${pad(r.flightNo, 4)} ${r.bookClass}${r.status}  ` +
-          `${r.origin} ${r.depTime}  ${r.dest} ${r.arrTime}  E0/${1 + (r.line % 2)}`
+        ` ${r.line} ${r.carrier} ${pad(r.flightNo, 4)} ${pad(r.dow, 8)} ${r.origin}${r.originTerm}  ${r.dest}${r.destTerm}  ` +
+          `${r.depTime}  ${r.arrTime}  ${r.stops}  ${r.effective}${yy} ${r.discontinue}   ${r.aircraft}  ${r.elapsed}`
       );
     });
+    out.push("TO DISPLAY CONNECTIONS, ENTER -MD-");
+    return { lines: out, state: s };
+  }
+
+  // ---- DO -- Flight Information Display ----
+  // Follow-up: DO<n> off the last AN/SN. Direct entry: DO<CX><FLT>/<ddMMM><ORIG><DEST>
+  const doFollowMatch = cmd.match(/^DO(\d+)$/);
+  const doDirectMatch = cmd.match(/^DO([A-Z]{2})(\d{1,4})\/(\d{2})([A-Z]{3})([A-Z]{3})([A-Z]{3})$/);
+  if (doFollowMatch || doDirectMatch) {
+    let carrier: string, flightNo: string, dateCode: string, origin: string, dest: string;
+    if (doFollowMatch) {
+      const line = parseInt(doFollowMatch[1], 10);
+      const row = s.lastAvailability.find((r) => r.line === line);
+      if (!row) {
+        out.push("INVALID LINE NUMBER - DISPLAY AVAILABILITY (AN/SN) FIRST");
+        return { lines: out, state: s };
+      }
+      carrier = row.carrier;
+      flightNo = row.flightNo;
+      dateCode = row.date;
+      origin = row.origin;
+      dest = row.dest;
+    } else {
+      const [, cx, flt, dd, mon, org, dst] = doDirectMatch!;
+      if (!MONTHS.includes(mon)) {
+        out.push("INVALID MONTH - USE 3 LETTER CODE (JAN,FEB,...)");
+        return { lines: out, state: s };
+      }
+      carrier = cx;
+      flightNo = flt;
+      dateCode = `${dd}${mon}`;
+      origin = org;
+      dest = dst;
+    }
+    const f = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
+    const classes = classesForFlight(carrier, flightNo, dateCode);
+    const dow = dowOf(dateCode);
+    out.push(`* 1A PLANNED FLIGHT INFO *`);
+    out.push(` ${carrier} ${flightNo}  ${daysBetweenToday(dateCode)} ${dow} ${dateCode}`);
+    out.push(` APT ARR  DY DEP  DY CLASS/MEAL     EQP  GRND EFT   TTL`);
+    out.push(` ${origin}       ${f.depTime}  ${dow}                              ${f.aircraft}`);
+    out.push(
+      ` ${dest}  ${f.arrTime}  ${dow}       ${classesLine(classes)}       ${f.elapsed} ${f.elapsed}`
+    );
+    out.push("COMMENTS-");
+    out.push(`1.FROM ${origin} - DEPARTS TERMINAL ${f.originTerm}`);
+    out.push(`2.TO ${dest} - ARRIVES TERMINAL ${f.destTerm}`);
+    out.push("3.ENTIRE FLT- NON-SMOKING");
+    out.push("4.ENTIRE FLT- ETICKET CANDIDATE");
+    out.push("CONFIGURATION-");
+    out.push(` ${f.aircraft} J0 Y${180 + (parseInt(f.aircraft, 10) % 100)}`);
     return { lines: out, state: s };
   }
 
@@ -328,11 +763,12 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       out.push("INVALID LINE NUMBER - DISPLAY AVAILABILITY (AN) FIRST");
       return { lines: out, state: s };
     }
-    if (row.status === "C") {
-      out.push(`CLASS ${cls} CLOSED ON LINE ${line} - NO AVAILABILITY`);
+    const classEntry = row.classes.find((c) => c.code === cls);
+    if (!classEntry) {
+      out.push(`CLASS ${cls} NOT OFFERED ON LINE ${line} - NO AVAILABILITY`);
       return { lines: out, state: s };
     }
-    const waitlist = row.status === "0";
+    const waitlist = classEntry.status === "0";
     const seg: Segment = {
       carrier: row.carrier,
       flightNo: row.flightNo,

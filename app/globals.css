@@ -1,6 +1,7 @@
 * { box-sizing: border-box; }
 
 :root {
+  color-scheme: dark;
   --bg: #1a1d21;
   --bg-panel: #21252b;
   --bg-input: #17191d;
@@ -159,12 +160,26 @@ html, body {
 
 .cli-input {
   flex: 1;
-  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-input);
   border: none;
   outline: none;
-  color: var(--fg);
+  color: var(--fg) !important;
+  caret-color: var(--accent);
   font-family: inherit;
   font-size: 13px;
+}
+
+/* Some mobile browsers auto-invert or grey out text in inputs when the OS
+   is in light mode, even with color-scheme set above -- pin it explicitly. */
+.cli-input::placeholder { color: var(--fg-dim); opacity: 1; }
+.cli-input:-webkit-autofill,
+.cli-input:-webkit-autofill:hover,
+.cli-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--fg) !important;
+  -webkit-box-shadow: 0 0 0px 1000px var(--bg-input) inset !important;
+  transition: background-color 9999s ease-in-out 0s;
 }
 
 .instructions-panel .scroll-area { color: #cdd2c8; }
