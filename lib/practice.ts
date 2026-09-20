@@ -153,4 +153,24 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       { instruction: "Jump back to area A.", hint: "JA", matcher: /^JA$/ },
     ],
   },
+  {
+    id: "t4-ticket",
+    title: "11. Price, Pay & Actually Issue the Ticket",
+    goal:
+      "TKOK/TKTL is only a promise to ticket later -- it never produces a ticket number. A real ticket needs a " +
+      "fare (FXP), a form of payment (FP), and the ticketing entry itself (TTP) -- and TTP only works on a PNR " +
+      "that's already been saved with ER or ET.",
+    steps: [
+      { instruction: "Start fresh: check availability from Manila (MNL) to Singapore (SIN) for February 1.", hint: "AN01FEBMNLSIN", matcher: /^AN01FEBMNLSIN$/ },
+      { instruction: "Sell 1 seat in class Y from line 1.", hint: "SS1Y1", matcher: /^SS1Y1$/ },
+      { instruction: "Add the passenger: CRUZ / MARIA, title MS.", hint: "NM1CRUZ/MARIA MS", matcher: /^NM\d+CRUZ\/MARIA(\s+MS)?$/ },
+      { instruction: "Add a phone contact.", hint: "AP 6621234567", matcher: /^AP\s+6621234567$/ },
+      { instruction: "Set the ticketing arrangement to no time limit.", hint: "TKOK", matcher: /^TKOK$/ },
+      { instruction: "Sign it.", hint: "RF MC", matcher: /^RF\s*[A-Z]+$/ },
+      { instruction: "Save it -- TTP later needs a PNR that already has a record locator.", hint: "ER", matcher: /^E[RT]$/ },
+      { instruction: "Price the itinerary. This creates a TST (T01) holding the fare.", hint: "FXP", matcher: /^FXP$/ },
+      { instruction: "Add a form of payment -- cash.", hint: "FP CASH", matcher: /^FP\s+CASH$/ },
+      { instruction: "Issue the ticket -- this is the step that actually produces a ticket number.", hint: "TTP", matcher: /^TTP$/ },
+    ],
+  },
 ];

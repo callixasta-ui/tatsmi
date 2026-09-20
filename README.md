@@ -1,10 +1,12 @@
 # GDS Command Trainer
 
 A browser-based simulator of real Amadeus-style "cryptic" GDS commands
-(AN, SS, NM, AP-family, TK, RF, RT, XE, DAC/DAN, FXP, SM/ST, etc.) for
-learning the actual syntax. Not connected to any real airline inventory or
-GDS — availability is deterministic/fake, but the entries and PNR rules
-mirror the real system as closely as a training tool reasonably can.
+(AN, SS, NM, AP-family, TK, RF, RT, XE, DAC/DAN, FXP, FP, TTP, SM/ST, etc.)
+for learning the actual syntax — including the full fare-quote → payment →
+ticket-issuance flow, not just booking. Not connected to any real airline
+inventory or GDS — availability is deterministic/fake, but the entries and
+PNR rules mirror the real system as closely as a training tool reasonably
+can.
 
 - **CLI panel** (top/left): type commands, see terminal-style output. Scrollable.
 - **Lower/right panel**, three tabs:
@@ -52,11 +54,25 @@ easy to get wrong and are modeled faithfully here:
   refuse the sale.
 - The `OS` entry displays as an `OSI` element on the PNR — that's correct
   behavior, not a typo.
+- **Ticketing is a real two-step (now three-step) flow, not just `TKOK`/`TKTL`.**
+  `TKOK`/`TKTL` is only an *arrangement* — a promise to ticket by some point.
+  It never produces a fare or a ticket, on the real system or here. To
+  actually issue a ticket: price the PNR with `FXP` (stores the result as a
+  TST — Transitional Stored Ticket, `T01`, `T02`...), add a form of payment
+  with `FP` (`FP CASH`, `FP CHEQUE`, or `FP CC<2-letter vendor><card
+  number>/<MMYY>`, e.g. `FPCCVI4444333322221111/0128`), then run `TTP`
+  (Ticketing Transactional Print) on the **saved** PNR. `TTP` refuses a
+  PNR with no locator, no unused TST, no `FP`, or any segment still
+  waitlisted (`HL`) — same constraints a real terminal enforces. On success
+  it mints a real-format 13-digit ticket number per passenger (3-digit IATA
+  airline numeric code + 10-digit document number, with a genuine mod-7
+  check digit) and adds it to the PNR as an `FA` element, same code real
+  Amadeus uses for an issued ticket line.
 
-Real Amadeus has far more beyond this (ticketing/payment, queues, profiles,
-fare rules, PNR splitting, and a lot more) — this trainer is the
-foundational subset, not the whole system. `HE` and `HE <topic>` work
-in-app for quick reference.
+Real Amadeus still has more beyond this — queues (`QT`/`QC`), PNR history
+(`RH`), PNR splitting/copying, traveler profiles, fare rules display, and
+more — this trainer is a thorough foundational-to-intermediate subset, not
+the whole system. `HE` and `HE <topic>` work in-app for quick reference.
 
 ## Local development
 

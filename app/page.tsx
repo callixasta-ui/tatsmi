@@ -78,7 +78,6 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
       { cmd: "RM VIP PAX", desc: "Free-text remark" },
       { cmd: "OS CTC AT WORK", desc: "Other service info (shows as OSI on the PNR)" },
       { cmd: "FFN BA1234567", desc: "Frequent flyer number" },
-      { cmd: "FXP", desc: "Fare quote for every segment in the active PNR" },
       { cmd: "SM / SM2", desc: "Seat map (last segment, or segment n)" },
       { cmd: "ST/24A/P1", desc: "Assign seat 24A to passenger 1" },
     ],
@@ -92,6 +91,15 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
       { cmd: "ET", desc: "End transaction -- saves the PNR, then clears the area for the next booking" },
       { cmd: "RT7F3K2Q", desc: "Retrieve a saved PNR by locator (no punctuation)" },
       { cmd: "IG", desc: "Discard the active PNR without saving" },
+    ],
+  },
+  {
+    section: "PRICE, PAY & ISSUE THE TICKET (needs a SAVED PNR)",
+    rows: [
+      { cmd: "FXP", desc: "Fare quote for the active PNR -- stores the price as a TST (T01, T02...)" },
+      { cmd: "FP CASH", desc: "Form of payment -- cash (or FP CHEQUE)" },
+      { cmd: "FP CCVI4444333322221111/0128", desc: "Form of payment -- credit card (2-letter vendor + number + MMYY)" },
+      { cmd: "TTP", desc: "Issue the ticket(s), using the TST + FP on file -- this is what actually produces a ticket number, unlike TKOK/TKTL" },
     ],
   },
   {
@@ -340,6 +348,7 @@ export default function Page() {
   const savedList = Object.values(engine.savedPNRs).sort((a, b) => (a.locator! > b.locator! ? 1 : -1));
   const totalPax = savedList.reduce((sum, p) => sum + p.names.length, 0);
   const withDeadline = savedList.filter((p) => p.ticketing?.startsWith("TKTL")).length;
+  const ticketed = savedList.filter((p) => p.tickets && p.tickets.length > 0).length;
 
   return (
     <div id="root-wrap" onClick={(e) => {
@@ -711,6 +720,7 @@ export default function Page() {
                   <div className="db-stat"><span className="db-stat-num">{savedList.length}</span>bookings</div>
                   <div className="db-stat"><span className="db-stat-num">{totalPax}</span>passengers</div>
                   <div className="db-stat"><span className="db-stat-num">{withDeadline}</span>with a deadline</div>
+                  <div className="db-stat"><span className="db-stat-num">{ticketed}</span>ticketed</div>
                 </div>
                 {savedList.length === 0 && (
                   <div className="task-goal" style={{ marginTop: 10 }}>
@@ -723,6 +733,15 @@ export default function Page() {
                     <div className="db-row">{pnr.names.map((n) => `${n.last}/${n.first}`).join(", ") || "(no names)"}</div>
                     <div className="db-row db-dim">{pnrRoute(pnr)}</div>
                     <div className="db-row db-dim">{pnr.ticketing ?? "no ticketing arrangement"} &middot; RF {pnr.receivedFrom ?? "--"}</div>
+                    {pnr.tickets && pnr.tickets.length > 0 ? (
+                      <div className="db-row db-dim">
+                        TICKETED: {pnr.tickets.map((t) => `${t.number} (${t.passenger})`).join(", ")}
+                      </div>
+                    ) : (
+                      <div className="db-row db-dim">
+                        {pnr.tst && pnr.tst.some((t) => !t.used) ? "PRICED (FXP) - NOT YET TICKETED" : "NOT PRICED / NOT TICKETED"}
+                      </div>
+                    )}
                     <div className="db-actions">
                       <button className="hint-btn" onClick={() => retrieveFromDashboard(pnr.locator!)}>View / Retrieve</button>
                       <button className="hint-btn db-delete" onClick={() => deleteFromDashboard(pnr.locator!)}>Delete</button>

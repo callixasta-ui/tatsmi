@@ -77,6 +77,29 @@ export interface SeatAssignment {
   pax: number;
 }
 
+// A fare quote stored against the PNR, same as a real Transitional Stored
+// Ticket (TST) -- FXP creates one, TTP consumes one to actually issue.
+export interface TstRecord {
+  id: string; // T01, T02...
+  base: number;
+  tax: number;
+  taxCode: string;
+  total: number;
+  currency: string;
+  used: boolean;
+}
+
+// An actually-issued ticket document, produced by TTP.
+export interface TicketRecord {
+  passenger: string;
+  number: string; // "125-2034567890" (3-digit airline code + 10-digit doc number)
+  validatingCarrier: string;
+  amount: number;
+  currency: string;
+  fop: string;
+  issueDate: string; // ddMMMyy
+}
+
 export interface PNR {
   locator?: string;
   names: Name[];
@@ -88,6 +111,9 @@ export interface PNR {
   ticketing?: string;
   receivedFrom?: string;
   seatAssignments: SeatAssignment[];
+  tst: TstRecord[];
+  formOfPayment?: string;
+  tickets: TicketRecord[];
 }
 
 export interface LastQuery {
@@ -131,17 +157,44 @@ export function newState(): EngineState {
   };
 }
 
+// Backfills any PNR loaded from an older saved session (before TST/FP/ticket
+// fields existed) so the rest of the engine can always assume they're arrays.
+function normalizePNR(p: Partial<PNR> | undefined): PNR {
+  const base = emptyPNR();
+  if (!p) return base;
+  return {
+    ...base,
+    ...p,
+    names: p.names ?? [],
+    segments: p.segments ?? [],
+    contacts: p.contacts ?? [],
+    remarks: p.remarks ?? [],
+    osi: p.osi ?? [],
+    seatAssignments: p.seatAssignments ?? [],
+    tst: p.tst ?? [],
+    tickets: p.tickets ?? [],
+  };
+}
+
 // Older saved sessions (before work areas existed) won't have area/parked.
 export function normalizeState(raw: Partial<EngineState> | undefined): EngineState {
   const base = newState();
   if (!raw) return base;
+  const parked: Record<string, AreaSnapshot> = {};
+  Object.entries(raw.parked ?? {}).forEach(([k, v]) => {
+    parked[k] = { ...v, activePNR: normalizePNR(v?.activePNR) };
+  });
+  const savedPNRs: Record<string, PNR> = {};
+  Object.entries(raw.savedPNRs ?? {}).forEach(([k, v]) => {
+    savedPNRs[k] = normalizePNR(v);
+  });
   return {
     ...base,
     ...raw,
-    activePNR: raw.activePNR ?? base.activePNR,
-    savedPNRs: raw.savedPNRs ?? {},
+    activePNR: normalizePNR(raw.activePNR),
+    savedPNRs,
     area: raw.area && WORK_AREAS.includes(raw.area) ? raw.area : "A",
-    parked: raw.parked ?? {},
+    parked,
   };
 }
 
@@ -155,12 +208,15 @@ export function pnrHasContent(p: PNR): boolean {
     p.seatAssignments.length > 0 ||
     !!p.frequentFlyer ||
     !!p.ticketing ||
-    !!p.receivedFrom
+    !!p.receivedFrom ||
+    (p.tst?.length ?? 0) > 0 ||
+    (p.tickets?.length ?? 0) > 0 ||
+    !!p.formOfPayment
   );
 }
 
 function emptyPNR(): PNR {
-  return { names: [], segments: [], contacts: [], remarks: [], osi: [], seatAssignments: [] };
+  return { names: [], segments: [], contacts: [], remarks: [], osi: [], seatAssignments: [], tst: [], tickets: [] };
 }
 
 const CARRIERS = ["BA", "LH", "AF", "TG", "SQ", "EK", "QF", "CX"];
@@ -355,6 +411,23 @@ function genLocator(): string {
   return out;
 }
 
+// Real IATA airline numeric codes, used as the 3-digit prefix on a ticket
+// document number (e.g. "125" for British Airways).
+const CARRIER_NUMERIC: Record<string, string> = {
+  BA: "125", LH: "220", AF: "057", TG: "217", SQ: "618", EK: "176", QF: "081", CX: "160",
+};
+
+// Ticket numbers are 3-digit airline code + 10-digit document number, where
+// the document number's last digit is a check digit = (first 9 digits) mod 7
+// -- the real IATA ticket-numbering rule, not an arbitrary format.
+function genTicketNumber(carrier: string): string {
+  const airlineCode = CARRIER_NUMERIC[carrier] ?? "999";
+  let serial = "";
+  for (let i = 0; i < 9; i++) serial += Math.floor(Math.random() * 10);
+  const checkDigit = parseInt(serial, 10) % 7;
+  return `${airlineCode}-${serial}${checkDigit}`;
+}
+
 export interface CmdResult {
   lines: string[];
   state: EngineState;
@@ -437,7 +510,7 @@ function dowOf(dateCode: string): string {
 // in one running numbered list, so XE<n> can cancel any of them by number.
 // RF and the ticketing arrangement are real but stay outside this numbering,
 // same as a real Amadeus display.
-type ElementType = "NM" | "SEG" | "AP" | "RM" | "OSI" | "FFN" | "ST";
+type ElementType = "NM" | "SEG" | "AP" | "RM" | "OSI" | "FFN" | "ST" | "FA";
 interface Element {
   index: number;
   type: ElementType;
@@ -460,6 +533,16 @@ function getElements(pnr: PNR): Element[] {
   pnr.osi.forEach((o) => els.push({ index: i++, type: "OSI", text: `OSI ${o}` }));
   if (pnr.frequentFlyer) els.push({ index: i++, type: "FFN", text: `FFN ${pnr.frequentFlyer}` });
   pnr.seatAssignments.forEach((sa) => els.push({ index: i++, type: "ST", text: `ST ${sa.seat} - P${sa.pax}` }));
+  // FA = ticket-number element, same code real Amadeus uses once TTP has
+  // actually issued a document (as opposed to TK.OK/TKTL, which is only
+  // the arrangement to ticket later).
+  (pnr.tickets ?? []).forEach((t) =>
+    els.push({
+      index: i++,
+      type: "FA",
+      text: `FA PAX ${t.passenger}  ${t.number}/ET${t.fop}/${t.currency} ${t.amount.toFixed(2)}/${t.issueDate}`,
+    })
+  );
   return els;
 }
 
@@ -475,6 +558,7 @@ function removeElement(pnr: PNR, index: number): boolean {
   else if (target.type === "OSI") pnr.osi.splice(pos, 1);
   else if (target.type === "FFN") pnr.frequentFlyer = undefined;
   else if (target.type === "ST") pnr.seatAssignments.splice(pos, 1);
+  else if (target.type === "FA") pnr.tickets.splice(pos, 1);
   return true;
 }
 
@@ -514,7 +598,9 @@ function helpTopic(topic: string): string[] {
     XE: "XE<n> -- cancel element number n, using the numbering shown by RT.",
     DAC: "DAC<code> -- decode a city/airport code to its name.",
     DAN: "DAN <text> -- encode a city name to its code.",
-    FXP: "FXP -- fare quote for every segment in the active PNR.",
+    FXP: "FXP -- fare quote for every segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
+    FP: "FP CASH | FP CHEQUE | FP CC<2-letter vendor code><card number>/<MMYY> -- form of payment, e.g. FP CASH or FPCCVI4444333322221111/0128. Required before TTP will issue.",
+    TTP: "TTP -- Ticketing Transactional Print: issues an actual ticket for every passenger on a SAVED PNR (needs a locator from ER/ET), using the latest unused TST and the FP on file. Refuses if any segment is still waitlisted (HL).",
     SM: "SM<n> -- seat map for segment n (defaults to the last segment sold).",
     ST: "ST/<seat>/P<n> -- assign a seat to passenger n. e.g. ST/24A/P1",
     CLS: "CLS -- clear the screen. Trainer convenience, not a real Amadeus entry.",
@@ -563,6 +649,8 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       remarks: [...state.activePNR.remarks],
       osi: [...state.activePNR.osi],
       seatAssignments: [...state.activePNR.seatAssignments],
+      tst: [...(state.activePNR.tst ?? [])],
+      tickets: [...(state.activePNR.tickets ?? [])],
     },
     savedPNRs: { ...state.savedPNRs },
     area: state.area ?? "A",
@@ -594,7 +682,9 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "RM <TEXT>                     REMARK",
       "OS <TEXT>                     OTHER SERVICE INFO (shows as OSI)",
       "FFN <CARRIER-NUMBER>          FREQUENT FLYER NUMBER",
-      "FXP                           FARE QUOTE FOR ACTIVE PNR",
+      "FXP                           FARE QUOTE FOR ACTIVE PNR (CREATES A TST)",
+      "FP CASH|CHEQUE|CC<VV>../<MMYY> FORM OF PAYMENT (needed before ticketing)",
+      "TTP                           ISSUE TICKET(S) FOR A SAVED PNR (needs FXP + FP)",
       "SM<n>                         SEAT MAP (n = segment, default last)",
       "ST/<SEAT>/P<n>                ASSIGN A SEAT",
       "XE<n>                         CANCEL ELEMENT NUMBER n",
@@ -910,7 +1000,11 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // FXP - fare quote (simplified: computes and prints directly)
+  // FXP - fare quote. Real Amadeus splits ticketing into two steps: price
+  // the itinerary (this), which stores the result as a TST (Transitional
+  // Stored Ticket, numbered T01/T02...), and later actually issue against
+  // that TST with TTP. TKOK/TKTL is a separate thing -- just an arrangement
+  // to ticket by some point, not a price and not a ticket.
   if (cmd === "FXP") {
     if (s.activePNR.segments.length === 0) {
       out.push("NO SEGMENTS IN PNR - SELL (SS) BEFORE PRICING");
@@ -921,12 +1015,103 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       const r = seededRand(seg.flightNo + seg.bookClass, i);
       base += 120 + (r % 480);
     });
-    const tax = Math.round(base * 0.18);
+    const yq = Math.round(base * 0.1);
+    const xt = Math.round(base * 0.08);
+    const total = base + yq + xt;
+    const tstId = `T${String(s.activePNR.tst.length + 1).padStart(2, "0")}`;
+    s.activePNR.tst.push({ id: tstId, base, tax: yq + xt, taxCode: "YQ/XT", total, currency: "USD", used: false });
     out.push("** FARE QUOTE - FXP **");
-    s.activePNR.segments.forEach((seg) => out.push(`  ${seg.carrier}${seg.flightNo} ${seg.bookClass}  ${seg.origin}${seg.dest}`));
-    out.push(`  FARE  USD ${base.toFixed(2)}`);
-    out.push(`  TAX   USD ${tax.toFixed(2)}`);
-    out.push(`  TOTAL USD ${(base + tax).toFixed(2)}`);
+    s.activePNR.segments.forEach((seg) => out.push(`  ${seg.carrier}${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.origin}${seg.dest}`));
+    out.push(`  FARE          USD ${base.toFixed(2)}`);
+    out.push(`  TAX   YQ      USD ${yq.toFixed(2)}`);
+    out.push(`  TAX   XT      USD ${xt.toFixed(2)}`);
+    out.push(`  TOTAL         USD ${total.toFixed(2)}`);
+    out.push(`  ${tstId} CREATED - FARE STORED. ADD FP (FORM OF PAYMENT), THEN TTP TO ISSUE.`);
+    return { lines: out, state: s };
+  }
+
+  // FP - form of payment. Real syntax: FP CASH | FP CHEQUE |
+  // FP CC<2-letter vendor code><card number>/<MMYY expiry>, e.g.
+  // FPCCVI4444333322221111/0128 (VI = Visa). Needed before TTP will issue.
+  if (cmd === "FP") {
+    out.push("FORMAT: FP CASH | FP CHEQUE | FP CC<VV><CARDNO>/<MMYY>  e.g. FPCCVI4444333322221111/0128");
+    return { lines: out, state: s };
+  }
+  const fpMatch = raw.match(/^FP\s*(.+)$/i);
+  if (fpMatch) {
+    const val = fpMatch[1].trim().toUpperCase();
+    if (val === "CASH" || val === "CHECK" || val === "CHEQUE") {
+      s.activePNR.formOfPayment = val === "CHECK" ? "CHEQUE" : val;
+      out.push(` FP ELEMENT ADDED - ${s.activePNR.formOfPayment}`);
+      return { lines: out, state: s };
+    }
+    const ccMatch = val.match(/^CC\s*([A-Z]{2})\s*(\d{13,19})\s*\/\s*(\d{2})(\d{2})$/);
+    if (ccMatch) {
+      const [, vendor, number, mm, yy] = ccMatch;
+      if (parseInt(mm, 10) < 1 || parseInt(mm, 10) > 12) {
+        out.push("INVALID FORMAT - EXPIRY MONTH MUST BE 01-12");
+        return { lines: out, state: s };
+      }
+      const masked = number.slice(0, 4) + "*".repeat(number.length - 8) + number.slice(-4);
+      s.activePNR.formOfPayment = `CC${vendor} ${masked}/${mm}${yy}`;
+      out.push(` FP ELEMENT ADDED - CC${vendor} ${masked}/${mm}${yy}`);
+      return { lines: out, state: s };
+    }
+    out.push("INVALID FORMAT - USE FP CASH, FP CHEQUE, OR FP CC<VV><CARDNO>/<MMYY> e.g. FPCCVI4444333322221111/0128");
+    return { lines: out, state: s };
+  }
+
+  // TTP - Ticketing Transactional Print: the entry that actually issues a
+  // ticket document (as opposed to TKOK/TKTL, which is only a promise to
+  // ticket later). Requires the PNR to already be saved, an unused TST from
+  // FXP, a form of payment, and no waitlisted (HL) segments.
+  if (cmd === "TTP") {
+    if (!s.activePNR.locator) {
+      out.push("PNR NOT ON FILE - SAVE WITH ER OR ET BEFORE TICKETING");
+      return { lines: out, state: s };
+    }
+    if (s.activePNR.names.length === 0) {
+      out.push("NO NAME(S) ON THE PNR");
+      return { lines: out, state: s };
+    }
+    const waitlisted = s.activePNR.segments.filter((seg) => seg.status === "HL");
+    if (waitlisted.length > 0) {
+      out.push("UNABLE TO ISSUE - SEGMENT(S) STILL WAITLISTED (HL):");
+      waitlisted.forEach((seg) => out.push(`  ${seg.carrier}${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.origin}${seg.dest}`));
+      return { lines: out, state: s };
+    }
+    const unused = s.activePNR.tst.filter((t) => !t.used);
+    if (unused.length === 0) {
+      out.push("NO FARE ON FILE - PRICE THE PNR WITH FXP BEFORE TICKETING");
+      return { lines: out, state: s };
+    }
+    if (!s.activePNR.formOfPayment) {
+      out.push("NO FORM OF PAYMENT ON FILE - ADD ONE WITH FP BEFORE TICKETING");
+      return { lines: out, state: s };
+    }
+    const tst = unused[unused.length - 1];
+    tst.used = true;
+    const carrier = s.activePNR.segments[0]?.carrier ?? "XX";
+    const today = new Date();
+    const issueDate = `${String(today.getDate()).padStart(2, "0")}${MONTHS[today.getMonth()]}${String(today.getFullYear()).slice(-2)}`;
+    const fopShort = s.activePNR.formOfPayment.startsWith("CC") ? s.activePNR.formOfPayment.slice(0, 4).trim() : s.activePNR.formOfPayment;
+    out.push("** TICKET(S) ISSUED - TTP **");
+    s.activePNR.names.forEach((n) => {
+      const number = genTicketNumber(carrier);
+      const passenger = `${n.last}/${n.first}${n.title ? " " + n.title : ""}`;
+      s.activePNR.tickets.push({
+        passenger,
+        number,
+        validatingCarrier: carrier,
+        amount: tst.total,
+        currency: tst.currency,
+        fop: fopShort,
+        issueDate,
+      });
+      out.push(`  ${pad(passenger, 24)} ${number}  ${tst.currency} ${tst.total.toFixed(2)}`);
+    });
+    s.savedPNRs[s.activePNR.locator] = s.activePNR;
+    out.push(`PNR ${s.activePNR.locator} UPDATED WITH TICKET NUMBER(S) - SEE RT`);
     return { lines: out, state: s };
   }
 
@@ -1139,5 +1324,9 @@ function renderPNR(pnr: PNR): string[] {
   els.forEach((e) => out.push(` ${e.index}.${e.text}`));
   if (pnr.ticketing) out.push(` TK.${pnr.ticketing}`);
   if (pnr.receivedFrom) out.push(` RF.${pnr.receivedFrom}`);
+  if (pnr.formOfPayment) out.push(` FP.${pnr.formOfPayment}`);
+  (pnr.tst ?? []).forEach((t) =>
+    out.push(` TST.${t.id}  ${t.currency} ${t.total.toFixed(2)}  ${t.used ? "(USED)" : "(UNUSED - READY FOR TTP)"}`)
+  );
   return out;
 }
