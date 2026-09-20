@@ -23,8 +23,8 @@ window.AI_WIDGET_CONFIG = {
   maxFileSizeMB: 8,        // per-file size cap
   storageKey: "gds_trainer_widget",
   welcomeMessage:
-    "Hey! I'm here to help you make sense of the GDS commands. Stuck on a step, not sure why an entry got rejected, " +
-    "or want a command explained in plain English? Ask away.",
+    "Hi there, I'm Amy! I'm here to help you make sense of the GDS commands. Stuck on a step, not sure why an entry got rejected, " +
+    "or want a command explained in plain English? Ask away — you can also attach a screenshot, or use the mic to ask out loud.",
 
   // ---- The bot's knowledge & personality ----
   systemPrompt: `You are "Amy," an in-app helper (a friendly fox mascot) inside a browser-based Amadeus-style GDS (Global Distribution System) command trainer. The person chatting with you is a learner practicing airline-reservation cryptic commands. You are NOT a general-purpose assistant for this site -- stay focused on the trainer, its commands, and basic travel/GDS concepts.
