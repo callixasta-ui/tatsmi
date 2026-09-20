@@ -3,11 +3,29 @@
 import { useEffect, useRef, useState } from "react";
 import { processCommand, newState, EngineState, PNR } from "@/lib/commands";
 import { PRACTICE_TASKS, PracticeStep } from "@/lib/practice";
+import { FLASHCARDS } from "@/lib/flashcards";
+import { QUIZ_LEVELS } from "@/lib/quiz";
+import { drawBadge, downloadCanvasPng } from "@/lib/badge";
 
 const STORAGE_KEY = "gds-trainer-state-v3";
 
 type Line = { text: string; kind: "echo" | "output" | "error" };
-type Tab = "practice" | "commands" | "database";
+type Tab = "practice" | "commands" | "flashcards" | "quiz" | "database";
+
+interface QuizResult {
+  score: number;
+  total: number;
+  passed: boolean;
+}
+
+interface ActiveQuiz {
+  levelId: string;
+  qIndex: number;
+  selected: number | null;
+  submitted: boolean;
+  correctCount: number;
+  finished: boolean;
+}
 
 // Matches each step to the earliest history entry that satisfies it and
 // hasn't already been claimed by an earlier step -- so if the same exact
@@ -94,9 +112,17 @@ export default function Page() {
   const [history, setHistory] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("practice");
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [flipped, setFlipped] = useState<Record<string, boolean>>({});
+  const [quizResults, setQuizResults] = useState<Record<string, QuizResult>>({});
+  const [activeQuiz, setActiveQuiz] = useState<ActiveQuiz | null>(null);
+  const [userName, setUserName] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [badgeLevelId, setBadgeLevelId] = useState<string | null>(null);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const badgeCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     try {
@@ -107,6 +133,8 @@ export default function Page() {
         if (parsed.engine) setEngine(parsed.engine);
         if (parsed.history) setHistory(parsed.history);
         if (parsed.revealed) setRevealed(parsed.revealed);
+        if (parsed.quizResults) setQuizResults(parsed.quizResults);
+        if (parsed.userName) setUserName(parsed.userName);
       }
     } catch {
       // ignore corrupt storage
@@ -115,15 +143,32 @@ export default function Page() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ lines, engine, history, revealed }));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ lines, engine, history, revealed, quizResults, userName })
+      );
     } catch {
       // storage full or unavailable -- non-fatal
     }
-  }, [lines, engine, history, revealed]);
+  }, [lines, engine, history, revealed, quizResults, userName]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [lines]);
+
+  useEffect(() => {
+    if (!badgeLevelId || !userName || editingName) return;
+    const canvas = badgeCanvasRef.current;
+    if (!canvas) return;
+    const level = QUIZ_LEVELS.find((l) => l.id === badgeLevelId);
+    if (!level) return;
+    drawBadge(canvas, {
+      name: userName,
+      levelOrder: level.order,
+      levelTitle: level.title,
+      dateEarned: new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+    });
+  }, [badgeLevelId, userName, editingName]);
 
   function runCommand(raw: string) {
     const trimmed = raw.trim();
@@ -155,7 +200,7 @@ export default function Page() {
   }
 
   function resetSession() {
-    if (!window.confirm("Reset everything? This clears your PNR, command history, and practice progress. This can't be undone.")) {
+    if (!window.confirm("Reset everything? This clears your PNR, command history, practice progress, and quiz/badge progress. This can't be undone.")) {
       return;
     }
     try {
@@ -171,10 +216,99 @@ export default function Page() {
     setHistory([]);
     setRevealed({});
     setInput("");
+    setQuizResults({});
+    setActiveQuiz(null);
+    setUserName("");
+    setBadgeLevelId(null);
   }
 
   function toggleHint(key: string) {
     setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function toggleFlip(key: string) {
+    setFlipped((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function isLevelUnlocked(level: (typeof QUIZ_LEVELS)[number]): boolean {
+    if (level.order === 1) return true;
+    const prevLevel = QUIZ_LEVELS.find((l) => l.order === level.order - 1);
+    return !!(prevLevel && quizResults[prevLevel.id]?.passed);
+  }
+
+  function startQuiz(levelId: string) {
+    setActiveQuiz({ levelId, qIndex: 0, selected: null, submitted: false, correctCount: 0, finished: false });
+  }
+
+  function selectOption(idx: number) {
+    setActiveQuiz((prev) => (prev && !prev.submitted ? { ...prev, selected: idx } : prev));
+  }
+
+  function checkAnswer() {
+    setActiveQuiz((prev) => {
+      if (!prev || prev.selected === null || prev.submitted) return prev;
+      const level = QUIZ_LEVELS.find((l) => l.id === prev.levelId);
+      if (!level) return prev;
+      const q = level.questions[prev.qIndex];
+      const correct = prev.selected === q.correctIndex;
+      return { ...prev, submitted: true, correctCount: prev.correctCount + (correct ? 1 : 0) };
+    });
+  }
+
+  function nextQuestion() {
+    setActiveQuiz((prev) => {
+      if (!prev) return prev;
+      const level = QUIZ_LEVELS.find((l) => l.id === prev.levelId);
+      if (!level) return prev;
+      const isLast = prev.qIndex >= level.questions.length - 1;
+      if (isLast) {
+        const total = level.questions.length;
+        const passedNow = prev.correctCount / total >= level.passFraction;
+        setQuizResults((results) => {
+          const existing = results[level.id];
+          return {
+            ...results,
+            [level.id]: {
+              score: Math.max(existing?.score ?? 0, prev.correctCount),
+              total,
+              passed: !!existing?.passed || passedNow,
+            },
+          };
+        });
+        return { ...prev, finished: true };
+      }
+      return { ...prev, qIndex: prev.qIndex + 1, selected: null, submitted: false };
+    });
+  }
+
+  function exitQuiz() {
+    setActiveQuiz(null);
+  }
+
+  function openBadge(levelId: string) {
+    setNameDraft(userName);
+    setEditingName(!userName);
+    setBadgeLevelId(levelId);
+  }
+
+  function closeBadge() {
+    setBadgeLevelId(null);
+    setEditingName(false);
+  }
+
+  function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = nameDraft.trim();
+    if (!trimmed) return;
+    setUserName(trimmed);
+    setEditingName(false);
+  }
+
+  function downloadBadge() {
+    const canvas = badgeCanvasRef.current;
+    const level = QUIZ_LEVELS.find((l) => l.id === badgeLevelId);
+    if (!canvas || !level) return;
+    downloadCanvasPng(canvas, `gds-trainer-level${level.order}-badge.png`);
   }
 
   function retrieveFromDashboard(locator: string) {
@@ -254,6 +388,12 @@ export default function Page() {
             <button className={tab === "commands" ? "tab active" : "tab"} onClick={() => setTab("commands")}>
               COMMAND LIST
             </button>
+            <button className={tab === "flashcards" ? "tab active" : "tab"} onClick={() => setTab("flashcards")}>
+              FLASHCARDS
+            </button>
+            <button className={tab === "quiz" ? "tab active" : "tab"} onClick={() => setTab("quiz")}>
+              QUIZ
+            </button>
             <button className={tab === "database" ? "tab active" : "tab"} onClick={() => setTab("database")}>
               DATABASE
             </button>
@@ -272,6 +412,217 @@ export default function Page() {
                     ))}
                   </div>
                 ))}
+              </>
+            )}
+
+            {tab === "flashcards" && (
+              <>
+                <div className="practice-intro">
+                  Tap a card to flip it. Front: the entry code and what it means. Back: when to use it, a full
+                  worked command, and a token-by-token breakdown of that command.
+                </div>
+                {FLASHCARDS.map((block) => (
+                  <div key={block.section}>
+                    <div className="instr-section">{block.section}</div>
+                    <div className="flash-grid">
+                      {block.cards.map((card) => {
+                        const key = `${block.section}-${card.code}`;
+                        const isFlipped = !!flipped[key];
+                        return (
+                          <button
+                            type="button"
+                            className={isFlipped ? "flash-card is-flipped" : "flash-card"}
+                            key={key}
+                            onClick={() => toggleFlip(key)}
+                            aria-label={`Flashcard for ${card.code}, tap to flip`}
+                          >
+                            <div className="flash-card-inner">
+                              <div className="flash-face flash-front">
+                                <div className="flash-code">{card.code}</div>
+                                <div className="flash-meaning">{card.meaning}</div>
+                                <div className="flash-tap-hint">tap to flip</div>
+                              </div>
+                              <div className="flash-face flash-back">
+                                <div className="flash-back-label">WHEN TO USE</div>
+                                <div className="flash-when">{card.whenToUse}</div>
+                                <div className="flash-back-label">FULL COMMAND</div>
+                                <div className="flash-full-cmd">{card.fullCommand}</div>
+                                <div className="flash-back-label">DISSECTION</div>
+                                <div className="flash-dissection">
+                                  {card.dissection.map((d, i) => (
+                                    <div className="flash-dissect-row" key={i}>
+                                      <span className="flash-dissect-part">{d.part}</span>
+                                      <span className="flash-dissect-desc">{d.desc}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {tab === "quiz" && (
+              <>
+                {!activeQuiz && (
+                  <>
+                    <div className="practice-intro">
+                      Five leveled quizzes, one per command group. Pass a level (70%+) to unlock the next one and
+                      earn a downloadable badge with your name on it.
+                    </div>
+                    {QUIZ_LEVELS.map((level) => {
+                      const unlocked = isLevelUnlocked(level);
+                      const result = quizResults[level.id];
+                      return (
+                        <div
+                          className={unlocked ? "task-card level-card" : "task-card level-card level-locked"}
+                          key={level.id}
+                        >
+                          <div className="task-title">
+                            LEVEL {level.order}: {level.title}
+                            {result?.passed && <span className="task-done">✓ PASSED</span>}
+                          </div>
+                          <div className="task-goal">{level.tagline}</div>
+                          {result && (
+                            <div className="level-score">
+                              Best score: {result.score}/{result.total}
+                            </div>
+                          )}
+                          <div className="level-actions">
+                            {unlocked ? (
+                              <button className="hint-btn" onClick={() => startQuiz(level.id)}>
+                                {result ? "Retake quiz" : "Start quiz"}
+                              </button>
+                            ) : (
+                              <span className="level-lock-note">🔒 Pass level {level.order - 1} to unlock</span>
+                            )}
+                            {result?.passed && (
+                              <button className="hint-btn" onClick={() => openBadge(level.id)}>
+                                🏅 View / download badge
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+
+                {activeQuiz &&
+                  !activeQuiz.finished &&
+                  (() => {
+                    const level = QUIZ_LEVELS.find((l) => l.id === activeQuiz.levelId)!;
+                    const q = level.questions[activeQuiz.qIndex];
+                    return (
+                      <div className="task-card">
+                        <div className="task-title">
+                          LEVEL {level.order}: {level.title} -- Q{activeQuiz.qIndex + 1}/{level.questions.length}
+                        </div>
+                        <div className="quiz-progress-track">
+                          <div
+                            className="quiz-progress-fill"
+                            style={{
+                              width: `${((activeQuiz.qIndex + (activeQuiz.submitted ? 1 : 0)) / level.questions.length) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="quiz-prompt">{q.prompt}</div>
+                        <div className="quiz-options">
+                          {q.options.map((opt, i) => {
+                            let cls = "option-btn";
+                            if (activeQuiz.submitted) {
+                              if (i === q.correctIndex) cls += " option-correct";
+                              else if (i === activeQuiz.selected) cls += " option-incorrect";
+                            } else if (i === activeQuiz.selected) {
+                              cls += " option-selected";
+                            }
+                            return (
+                              <button
+                                type="button"
+                                className={cls}
+                                key={i}
+                                disabled={activeQuiz.submitted}
+                                onClick={() => selectOption(i)}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {activeQuiz.submitted && (
+                          <div
+                            className={
+                              activeQuiz.selected === q.correctIndex
+                                ? "quiz-feedback quiz-feedback-correct"
+                                : "quiz-feedback quiz-feedback-incorrect"
+                            }
+                          >
+                            {activeQuiz.selected === q.correctIndex ? "Correct. " : "Not quite. "}
+                            {q.explanation}
+                          </div>
+                        )}
+                        <div className="level-actions">
+                          <button className="hint-btn" onClick={exitQuiz}>
+                            Exit quiz
+                          </button>
+                          {!activeQuiz.submitted ? (
+                            <button className="hint-btn" disabled={activeQuiz.selected === null} onClick={checkAnswer}>
+                              Check answer
+                            </button>
+                          ) : (
+                            <button className="hint-btn" onClick={nextQuestion}>
+                              {activeQuiz.qIndex + 1 >= level.questions.length ? "See results" : "Next question"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                {activeQuiz &&
+                  activeQuiz.finished &&
+                  (() => {
+                    const level = QUIZ_LEVELS.find((l) => l.id === activeQuiz.levelId)!;
+                    const total = level.questions.length;
+                    const passed = activeQuiz.correctCount / total >= level.passFraction;
+                    return (
+                      <div className="task-card">
+                        <div className="task-title">
+                          LEVEL {level.order}: {level.title} -- Result
+                        </div>
+                        <div className="quiz-result-score">
+                          {activeQuiz.correctCount}/{total}
+                        </div>
+                        <div className={passed ? "quiz-result-verdict quiz-result-pass" : "quiz-result-verdict quiz-result-fail"}>
+                          {passed ? "PASSED -- badge unlocked!" : "NOT YET -- try again"}
+                        </div>
+                        <div className="level-actions">
+                          <button className="hint-btn" onClick={exitQuiz}>
+                            Back to levels
+                          </button>
+                          <button className="hint-btn" onClick={() => startQuiz(level.id)}>
+                            Retake quiz
+                          </button>
+                          {passed && (
+                            <button
+                              className="hint-btn"
+                              onClick={() => {
+                                setActiveQuiz(null);
+                                openBadge(level.id);
+                              }}
+                            >
+                              🏅 Claim badge
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
               </>
             )}
 
@@ -354,6 +705,65 @@ export default function Page() {
         storage. Nothing about your bookings is ever sent anywhere. Tap "Your Privacy" above for the full picture,
         including what happens if you use the chat helper.
       </footer>
+
+      {badgeLevelId && (() => {
+        const level = QUIZ_LEVELS.find((l) => l.id === badgeLevelId);
+        if (!level) return null;
+        return (
+          <div className="modal-backdrop" onClick={closeBadge}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-title">Level {level.order} Badge</div>
+
+              {editingName ? (
+                <form className="badge-name-form" onSubmit={saveName}>
+                  <p className="modal-body" style={{ marginBottom: 8 }}>
+                    Enter the name you'd like printed on the badge:
+                  </p>
+                  <input
+                    className="badge-name-input"
+                    value={nameDraft}
+                    autoFocus
+                    maxLength={40}
+                    placeholder="e.g. Jane Doe"
+                    onChange={(e) => setNameDraft(e.target.value)}
+                  />
+                  <div className="level-actions" style={{ marginTop: 10 }}>
+                    <button type="submit" className="modal-close" disabled={!nameDraft.trim()}>
+                      Save &amp; show badge
+                    </button>
+                    {userName && (
+                      <button type="button" className="hint-btn" onClick={() => setEditingName(false)}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <canvas ref={badgeCanvasRef} className="badge-canvas" />
+                  <div className="level-actions" style={{ marginTop: 12 }}>
+                    <button className="modal-close" onClick={downloadBadge}>
+                      ⬇ Download PNG
+                    </button>
+                    <button
+                      className="hint-btn"
+                      onClick={() => {
+                        setNameDraft(userName);
+                        setEditingName(true);
+                      }}
+                    >
+                      Change name
+                    </button>
+                    <button className="hint-btn" onClick={closeBadge}>
+                      Close
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {privacyOpen && (
         <div className="modal-backdrop" onClick={() => setPrivacyOpen(false)}>
