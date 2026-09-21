@@ -1,7 +1,7 @@
 # GDS Command Trainer
 
 A browser-based simulator of real Amadeus-style "cryptic" GDS commands
-(AN, SS, NM, AP-family, TK, RF, RT, XE, DAC/DAN, FXP, FP, TTP, SM/ST, etc.)
+(AN, SS, NM, AP-family, TK, RF, RT, XE, DAC/DAN, FQC, FXP, FP, TTP, SM/ST, etc.)
 for learning the actual syntax — including the full fare-quote → payment →
 ticket-issuance flow, not just booking. Not connected to any real airline
 inventory or GDS — availability is deterministic/fake, but the entries and
@@ -54,6 +54,14 @@ easy to get wrong and are modeled faithfully here:
   refuse the sale.
 - The `OS` entry displays as an `OSI` element on the PNR — that's correct
   behavior, not a typo.
+- Amadeus does handle multiple currencies, but not by letting `FXP` price a
+  PNR in whatever currency you like — a live system prices/tickets in the
+  travel office's own configured currency (USD here, matching `FXP`'s
+  output). Cross-currency conversion is its own entry, `FQC` (Bankers
+  Selling Rate conversion), e.g. `FQC100USD/PHP`. Implemented here with a
+  fixed illustrative rate table (USD, EUR, GBP, PHP, JPY, AUD, SGD, HKD, CAD,
+  NZD) — not a live feed, same as availability being deterministic rather
+  than real inventory.
 - **Ticketing is a real two-step (now three-step) flow, not just `TKOK`/`TKTL`.**
   `TKOK`/`TKTL` is only an *arrangement* — a promise to ticket by some point.
   It never produces a fare or a ticket, on the real system or here. To
