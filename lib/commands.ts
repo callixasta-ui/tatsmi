@@ -1368,12 +1368,17 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const roundedFares = Math.ceil(converted);
     const roundedOther = Math.round(converted * 100) / 100;
     const truncated = Math.floor(converted * 100) / 100;
+    const today = new Date();
+    const effDate = `${String(today.getDate()).padStart(2, "0")}${MONTHS[today.getMonth()]}${String(today.getFullYear()).slice(-2)}`;
     out.push(`FQC${fqcMatch[1]}${from}${fqcMatch[3] ? "/" + to : ""}`);
     out.push(`BSR CONVERSION OF ${from} TO ${to}`);
     out.push(`${to} ${roundedFares.toFixed(2)} - ROUNDED AS FARES`);
     out.push(`${to} ${roundedOther.toFixed(2)} - ROUNDED AS OTHER CHARGES`);
     out.push(`${to} ${truncated.toFixed(2)} - AMOUNT TRUNCATED`);
     out.push(`BSR USED 1 ${from} = ${rate.toFixed(8)} ${to}`);
+    out.push(`EFF ${effDate}`);
+    out.push(`ROUNDING OF FARES UP TO 1.00 ${to}`);
+    out.push(`ROUNDING OF OTHER CHARGES UP TO 0.01 ${to}`);
     out.push(`${from} - ${CCY_NAMES[from]}`);
     out.push(`${to} - ${CCY_NAMES[to]}`);
     return { lines: out, state: s };
