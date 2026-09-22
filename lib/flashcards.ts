@@ -232,12 +232,12 @@ export const FLASHCARDS: FlashcardSection[] = [
       },
       {
         code: "XE",
-        meaning: "Cancel one numbered element",
-        whenToUse: "To remove a mistake -- look up the number from RT first",
-        fullCommand: "XE3",
+        meaning: "Cancel a numbered element, a range, or several selected elements",
+        whenToUse: "To remove a mistake -- look up the number(s) from RT first",
+        fullCommand: "XE3-6",
         dissection: [
           { part: "XE", desc: "entry code -- Cancel Element" },
-          { part: "3", desc: "element number, taken from the RT numbering" },
+          { part: "3-6", desc: "a range of element numbers (or use 3,6 for just those two)" },
         ],
       },
       {
@@ -251,21 +251,80 @@ export const FLASHCARDS: FlashcardSection[] = [
       },
       {
         code: "RT (retrieve)",
-        meaning: "Retrieve a saved PNR by its record locator",
+        meaning: "Retrieve a saved PNR by record locator or family name",
         whenToUse: "To pull up a booking that was already saved with ER, on a later visit",
         fullCommand: "RT7F3K2Q",
         dissection: [
           { part: "RT", desc: "entry code -- Retrieve" },
-          { part: "7F3K2Q", desc: "6-character record locator, no punctuation" },
+          { part: "7F3K2Q", desc: "6-character record locator, no punctuation (or use RT/SURNAME to search by name)" },
         ],
       },
       {
         code: "IG",
-        meaning: "Ignore -- discard the active PNR without saving",
-        whenToUse: "To abandon a booking you don't want to keep, before running ER",
+        meaning: "Ignore -- discards a brand-new PNR, or reverts an already-saved one to its last save",
+        whenToUse: "New booking you don't want to keep: discards it. Editing a saved PNR and want to undo the session's changes: reverts to what ER last saved, instead of wiping it",
         fullCommand: "IG",
         dissection: [
-          { part: "IG", desc: "entry code, no parameters -- clears the active PNR" },
+          { part: "IG", desc: "entry code, no parameters -- discard (new PNR) or revert (saved PNR)" },
+        ],
+      },
+    ],
+  },
+  {
+    section: "SEGMENT VARIANTS & NAME MODIFIERS",
+    cards: [
+      {
+        code: "SIARNK",
+        meaning: "Arrival Unknown segment -- keeps itinerary continuity for a leg not flown",
+        whenToUse: "When the passenger changes to another form of transport between two points in the itinerary",
+        fullCommand: "SIARNK",
+        dissection: [
+          { part: "SI", desc: "transaction code" },
+          { part: "ARNK", desc: "Arrival Unknown indicator" },
+        ],
+      },
+      {
+        code: "SO",
+        meaning: "Open Flight Segment -- no confirmed date/flight yet, still pricing/ticketing-ready",
+        whenToUse: "When the passenger's exact travel date isn't known but the segment must stay in the itinerary",
+        fullCommand: "SOAFC8AUGCDGMNL",
+        dissection: [
+          { part: "SO", desc: "segment open transaction code" },
+          { part: "AF", desc: "airline code" },
+          { part: "C", desc: "class of service" },
+          { part: "8AUG", desc: "fictitious date, recommended for pricing/ticketing" },
+          { part: "CDGMNL", desc: "origin and destination" },
+        ],
+      },
+      {
+        code: "SS (waitlist)",
+        meaning: "Sells into a waitlist and sets a priority code, when the class shows 0 open seats",
+        whenToUse: "The class on your chosen line shows status 0 but you still want to try for a seat",
+        fullCommand: "SS2F3/PE",
+        dissection: [
+          { part: "SS2F3", desc: "short sell entry -- 2 seats, class F, line 3" },
+          { part: "/PE", desc: "priority waitlist code (airline-specific)" },
+        ],
+      },
+      {
+        code: "NM (infant)",
+        meaning: "Attaches an infant's name to an adult's Name element",
+        whenToUse: "Booking an infant who doesn't occupy their own seat",
+        fullCommand: "NM1CRUZ/JANE MS (INFVICTOR/JOHN/12NOV20)",
+        dissection: [
+          { part: "CRUZ/JANE MS", desc: "the adult passenger" },
+          { part: "(INFVICTOR/JOHN/12NOV20)", desc: "infant's surname VICTOR, given name JOHN, DOB 12NOV20 -- omit the surname if it matches the adult's" },
+        ],
+      },
+      {
+        code: "NU",
+        meaning: "Name Update -- edits a passenger already on the PNR without recreating it",
+        whenToUse: "To fix a first name, title, or CHD/INF modifier on a name already saved",
+        fullCommand: "NU1/GRACE MS",
+        dissection: [
+          { part: "NU", desc: "entry code -- Name Update" },
+          { part: "1", desc: "the passenger number to modify" },
+          { part: "/GRACE MS", desc: "new first name and title" },
         ],
       },
     ],

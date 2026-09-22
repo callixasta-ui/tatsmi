@@ -173,4 +173,20 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       { instruction: "Issue the ticket -- this is the step that actually produces a ticket number.", hint: "TTP", matcher: /^TTP$/ },
     ],
   },
+  {
+    id: "t5-family-and-arnk",
+    title: "12. Family Names, an Infant & a Broken Itinerary",
+    goal:
+      "The Name element can hold more than one passenger, a child, and an attached infant in a single entry -- and " +
+      "ARNK keeps segment continuity when part of a trip isn't flown at all.",
+    steps: [
+      { instruction: "Add two passengers sharing the family name REYES: HANS (MR) and HEIDI (MS), in one NM entry.", hint: "NM2REYES/HANS MR/HEIDI MS", matcher: /^NM\d+REYES\s*\/\s*HANS\s+MR\/HEIDI\s+MS$/ },
+      { instruction: "Add a child, BRADLEY / MICHAEL (MSTR), born 12DEC16.", hint: "NM1BRADLEY/MICHAEL MSTR(CHD/12DEC16)", matcher: /^NM\d+BRADLEY\/MICHAEL\s+MSTR\(CHD\/12DEC16\)$/ },
+      { instruction: "Add BROSNAN / SUZANNE (MS) traveling with her infant Pauline (same surname), born 01NOV20.", hint: "NM1BROSNAN/SUZANNE MS(INF/PAULINE/01NOV20)", matcher: /^NM\d+BROSNAN\/SUZANNE\s+MS\s*\(INF\/PAULINE\/01NOV20\)$/ },
+      { instruction: "Review the PNR -- notice the element numbers for what you just added.", hint: "RT", matcher: /^RT$/ },
+      { instruction: "You misspelled the child's title -- use Name Update to fix passenger 2's title only (keep MICHAEL, switch to MSTR).", hint: "NU2/MICHAEL MSTR", matcher: /^NU2\/MICHAEL\s+MSTR$/ },
+      { instruction: "Between two of this trip's flights the passenger is taking a train, not a plane -- keep the itinerary continuous with an Arrival Unknown segment.", hint: "SIARNK", matcher: /^SIARNK$/ },
+      { instruction: "Review the PNR once more to see the ARNK sitting in the segment sequence.", hint: "RT", matcher: /^RT$/ },
+    ],
+  },
 ];

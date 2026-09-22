@@ -2,10 +2,13 @@
 // Entry syntax, mandatory-element rules, and screen shapes are modeled on
 // real Amadeus cryptic entries (AN/SN/TN/DO/AC/SS/NM/AP-family/TK/RF/RT/XE/
 // DAC-DAN/FXP/SM-ST, etc), including the flight-information-display family
-// (availability / schedule / timetable / flight info) from STI handout
-// TH2106. It's a simplified training subset, not the full system -- see the
-// in-app HE listing for what's covered. All data stays local; nothing here
-// is connected to any live GDS or airline inventory.
+// (availability / schedule / timetable / flight info) AND the full Passenger
+// Name Record chapter (mandatory SMART elements, ARNK/open/waitlisted/dual
+// segments, DK/LK/SS/LL status codes, child & infant names, Name Update,
+// ranged/selected XE, retrieval by name, and ignore-vs-revert semantics)
+// from STI handout TH2106. It's a simplified training subset, not the full
+// system -- see the in-app HE listing for what's covered. All data stays
+// local; nothing here is connected to any live GDS or airline inventory.
 
 export interface ClassStatus {
   code: string;
@@ -57,13 +60,19 @@ export interface Segment {
   dest: string;
   depTime: string;
   arrTime: string;
-  status: string; // HK confirmed, HL waitlisted
+  status: string; // HK confirmed, HL waitlisted (engine logic keys off this)
+  segType?: "FLIGHT" | "ARNK" | "OPEN"; // default FLIGHT
+  accessCode?: string; // DK/LK/SS (confirmed, by access level) or LL (waitlisted) -- display only
+  waitlistPriority?: string; // e.g. "PE" from SS2F3/PE
 }
 
 export interface Name {
   last: string;
   first: string;
   title?: string;
+  paxType?: "CHD" | "INF"; // set when this name carries a (CHD/...) modifier
+  childDob?: string; // ddMMMyy, from (CHD/ddMMMyy)
+  infant?: { last: string; first: string; dob: string }; // from (INF/...) or (INFsurname/...)
 }
 
 export type ContactType = "AP" | "APM" | "APH" | "APE";
@@ -520,14 +529,34 @@ interface Element {
 function getElements(pnr: PNR): Element[] {
   const els: Element[] = [];
   let i = 1;
-  pnr.names.forEach((n) => els.push({ index: i++, type: "NM", text: `${n.last}/${n.first}${n.title ? " " + n.title : ""}` }));
-  pnr.segments.forEach((seg) =>
+  pnr.names.forEach((n) => {
+    let text = `${n.last}/${n.first}${n.title ? " " + n.title : ""}`;
+    if (n.paxType === "CHD" && n.childDob) text += `(CHD/${n.childDob})`;
+    if (n.paxType === "INF" && !n.infant) text += `(INS)`;
+    if (n.infant) text += `(INF${n.infant.last !== n.last ? n.infant.last : ""}/${n.infant.first}/${n.infant.dob})`;
+    els.push({ index: i++, type: "NM", text });
+  });
+  pnr.segments.forEach((seg) => {
+    if (seg.segType === "ARNK") {
+      els.push({ index: i++, type: "SEG", text: `ARNK` });
+      return;
+    }
+    if (seg.segType === "OPEN") {
+      els.push({
+        index: i++,
+        type: "SEG",
+        text: `${seg.carrier}OPEN  ${seg.bookClass}  ${seg.date || "(NO DATE)"}  ${seg.origin}${seg.dest}`,
+      });
+      return;
+    }
+    const shown = seg.accessCode ?? seg.status;
+    const wlSuffix = seg.status === "HL" && seg.waitlistPriority ? `/${seg.waitlistPriority}` : "";
     els.push({
       index: i++,
       type: "SEG",
-      text: `${seg.carrier} ${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.date}  ${seg.origin}${seg.dest}  ${seg.status}  ${seg.depTime}  ${seg.arrTime}`,
-    })
-  );
+      text: `${seg.carrier} ${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.date}  ${seg.origin}${seg.dest}  ${shown}1${wlSuffix}  ${seg.depTime}  ${seg.arrTime}`,
+    });
+  });
   pnr.contacts.forEach((c) => els.push({ index: i++, type: "AP", text: `${c.type} ${c.value}` }));
   pnr.remarks.forEach((r) => els.push({ index: i++, type: "RM", text: `RM ${r}` }));
   pnr.osi.forEach((o) => els.push({ index: i++, type: "OSI", text: `OSI ${o}` }));
@@ -581,24 +610,30 @@ function helpTopic(topic: string): string[] {
     TN: "TN<ddMMM><ORIG><DEST> -- timetable: every flight on that city pair for a 7-day period, with days of operation.",
     DO: "DO<n> (follow-up to an AN/SN line) OR DO<CX><FLT>/<ddMMM><ORIG><DEST> (direct entry) -- detailed flight information for one flight.",
     AC: "AC<ddMMM> change date | AC<n>/AC-<n> shift n days | MN move to next day | MY move to previous day | MPAN return to the previous availability display.",
-    SS: "SS<n><CLASS><LINE> -- sell n seats, class, from an availability line. e.g. SS1Y1",
-    NM: "NM<n><LAST>/<FIRST> <TITLE> -- add a passenger name. e.g. NM1SMITH/JOHN MR",
+    SS: "SS<n><CLASS><LINE>[/<PRIORITY>] -- sell n seats, class, from an availability line; add /<code> (e.g. /PE) to set a waitlist priority code when the line shows 0 seats. SS<n><C1><L1>*<C2><L2> -- Dual City Pair sell, one class/line from each half of a dual (AN...*...) display. e.g. SS1Y1, SS2F3/PE, SS1F2*C12",
+    NM: "NM<n><LAST>/<FIRST> <TITLE> -- add a passenger name (n = how many names in this entry). Chain more with '/': NM2REYES/HANS MR/HEIDI MS. Child: NM1BRADLEY/MICHAEL MSTR(CHD/12DEC16). Infant, same surname: NM1BROSNAN/SUZANNE MS(INF/PAULINE/01NOV20). Infant, different surname: NM1CRUZ/JANE MS(INFVICTOR/JOHN/12NOV20). Infant as its own seated passenger: NM1SUMMER/DIANA(INS), then SR INFT.",
+    NU: "NU<n>/<FIRST> <TITLE>[(CHD/ddMMMyy)|(INF/first/ddMMMyy)] -- Name Update: change passenger n's first name/title or CHD/INF modifier without recreating the PNR. NU<n>/ (nothing after the slash) removes the CHD/INF modifier. e.g. NU1/GRACE MS",
+    SR: "SR INFT - <freeflow text> /P<n> -- request a seat for an infant registered as its own (INS) passenger, associated with adult/passenger n. e.g. SR INFT - 11MTHS OCCUPYING SEAT/P1",
     AP: "AP <phone> | APM <mobile> | APH <home> | APE <email> -- contact elements.",
     TK: "TKOK -- no time limit. TKTL<ddMMM>/<hhmm> -- ticketing time limit.",
     RF: "RF <name/initials> -- Received From. Your signature, required before ER.",
     RM: "RM <text> -- a free-text remark.",
     OS: "OS <text> -- Other Service Information (displays as an OSI element).",
+    SI: "SIARNK -- Arrival Unknown segment: an information-only segment that keeps itinerary continuity when the passenger changes transport mode mid-trip.",
+    SO: "SO<CX><CLASS>[<ddMMM>]<ORIG><DEST> -- Open Flight Segment: no confirmed flight/date yet, keeps segment continuity for pricing/ticketing. A fictitious date is recommended. e.g. SOAFC8AUGCDGMNL, or without a date: SOAFCCDGMNL",
+    RTSVC: "RTSVC -- flight service information for the last segment sold (shown after a waitlisted SS).",
     FFN: "FFN <CARRIER-NUMBER> -- attach a frequent flyer number. e.g. FFN BA-1234567",
-    RT: "RT -- redisplay the active PNR. RT<LOCATOR> -- retrieve a saved PNR.",
+    RT: "RT -- redisplay the active PNR. RT<LOCATOR> -- retrieve a saved PNR by record locator. RT/<SURNAME> -- retrieve by family name.",
     ER: "ER -- End & Retrieve: saves the PNR, hands back a record locator, and leaves the PNR open on screen. Requires the 5 mandatory elements.",
     ET: "ET -- End Transaction: saves the PNR (same 5 mandatory elements as ER) and clears the work area so you can start the next booking straight away.",
-    IG: "IG -- ignore/discard the active PNR without saving.",
+    IG: "IG -- during creation (PNR never saved), discards everything. On an already-saved PNR you're modifying, ignores your changes and reverts to the last-saved form instead.",
+    IR: "IR -- after ending a PNR, redisplay the airline's own record locator for each air segment (partial copy of the PNR).",
     JA: "JA..JF -- jump to work area A-F. Each area holds its own PNR in progress, so you can work several bookings side by side. JO shows what's in each area.",
     JO: "JO -- work area status: which of areas A-F are empty, in progress, or holding a saved PNR.",
-    XE: "XE<n> -- cancel element number n, using the numbering shown by RT.",
+    XE: "XE<n> -- cancel element number n. XE<a>-<b> -- cancel a range. XE<a>,<b> -- cancel selected elements. Numbering comes from RT.",
     DAC: "DAC<code> -- decode a city/airport code to its name.",
     DAN: "DAN <text> -- encode a city name to its code.",
-    FXP: "FXP -- fare quote for every segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
+    FXP: "FXP -- fare quote for every real (non-ARNK) segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
     FP: "FP CASH | FP CHEQUE | FP CC<2-letter vendor code><card number>/<MMYY> -- form of payment, e.g. FP CASH or FPCCVI4444333322221111/0128. Required before TTP will issue.",
     TTP: "TTP -- Ticketing Transactional Print: issues an actual ticket for every passenger on a SAVED PNR (needs a locator from ER/ET), using the latest unused TST and the FP on file. Refuses if any segment is still waitlisted (HL).",
     SM: "SM<n> -- seat map for segment n (defaults to the last segment sold).",
@@ -674,8 +709,14 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "MN / MY / MPAN                MOVE NEXT DAY / MOVE YESTERDAY / PREVIOUS DISPLAY",
       "TN <ddMMM><ORIG><DEST>        TIMETABLE (7-DAY FLIGHT FREQUENCY)",
       "DO<n> / DO<CX><FLT>/<ddMMM><ORIG><DEST>   FLIGHT INFORMATION DISPLAY",
-      "SS<n><CLASS><LINE>            SELL SEGMENT",
-      "NM<n><LAST>/<FIRST> <TTL>     ADD NAME",
+      "SS<n><CLASS><LINE>[/<CODE>]   SELL SEGMENT (append /CODE for waitlist priority, e.g. SS2F3/PE)",
+      "SS<n><C1><L1>*<C2><L2>        DUAL CITY PAIR SELL (e.g. SS1F2*C12)",
+      "SIARNK                        ARRIVAL UNKNOWN SEGMENT (keeps itinerary continuity)",
+      "SO<CX><CLS>[<ddMMM>]<O><D>    OPEN FLIGHT SEGMENT (no confirmed date yet)",
+      "RTSVC                         FLIGHT SERVICE INFO FOR THE LAST SEGMENT SOLD",
+      "NM<n><LAST>/<FIRST> <TTL>     ADD NAME(S) -- chain with '/', or (CHD/..)/(INF/../..)/(INS)",
+      "NU<n>/<FIRST> <TTL>[(...)]    NAME UPDATE -- edit passenger n's name/title/CHD-INF modifier",
+      "SR INFT - <TEXT> /P<n>        REQUEST A SEAT FOR AN (INS) INFANT, TIED TO PASSENGER n",
       "AP / APM / APH / APE <text>   CONTACT (PHONE/MOBILE/HOME/EMAIL)",
       "TKOK | TKTL<ddMMM>/<hhmm>     TICKETING ARRANGEMENT",
       "RF <NAME>                     RECEIVED FROM (mandatory before ER)",
@@ -687,12 +728,13 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "TTP                           ISSUE TICKET(S) FOR A SAVED PNR (needs FXP + FP)",
       "SM<n>                         SEAT MAP (n = segment, default last)",
       "ST/<SEAT>/P<n>                ASSIGN A SEAT",
-      "XE<n>                         CANCEL ELEMENT NUMBER n",
+      "XE<n> / XE<a>-<b> / XE<a>,<b> CANCEL ELEMENT n / A RANGE / SELECTED ELEMENTS",
       "RT                            DISPLAY ACTIVE PNR",
-      "RT<LOCATOR>                   RETRIEVE A SAVED PNR",
+      "RT<LOCATOR> / RT/<SURNAME>    RETRIEVE A SAVED PNR (BY LOCATOR OR FAMILY NAME)",
       "ER                            END TRANSACTION & REDISPLAY -- SAVE, PNR STAYS OPEN",
       "ET                            END TRANSACTION -- SAVE, THEN CLEAR THE AREA",
-      "IG                            IGNORE / CLEAR ACTIVE PNR",
+      "IG                            IGNORE -- DISCARD IF NEW, OR REVERT TO LAST SAVE IF MODIFYING",
+      "IR                            SHOW THE AIRLINE RECORD LOCATOR FOR EACH AIR SEGMENT",
       "JA..JF / JO                   JUMP TO WORK AREA A-F / SHOW AREA STATUS",
       "DAC<CODE> / DAN <TEXT>        DECODE / ENCODE A CITY",
       "CLS                           CLEAR SCREEN (trainer convenience only)",
@@ -894,21 +936,21 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // SS command: SS1Y1  (sell n, class, from availability line)
-  const ssMatch = cmd.match(/^SS(\d+)([A-Z])(\d+)$/);
-  if (ssMatch) {
-    const [, nStr, cls, lineStr] = ssMatch;
-    const line = parseInt(lineStr, 10);
+  // Maps a line's access indicator (/ . * "") to the real Amadeus status
+  // code shown once a seat is confirmed -- DK/LK/SS per the handout's
+  // participation-level table. LL is used for a waitlisted sell.
+  function accessCodeFor(access: string, waitlisted: boolean): string {
+    if (waitlisted) return "LL";
+    if (access === "/" || access === ".") return "DK";
+    if (access === "*") return "LK";
+    return "SS";
+  }
+
+  function sellOneLine(nStr: string, cls: string, line: number, priority?: string): { seg?: Segment; err?: string; waitlist?: boolean } {
     const row = s.lastAvailability.find((r) => r.line === line);
-    if (!row) {
-      out.push("INVALID LINE NUMBER - DISPLAY AVAILABILITY (AN) FIRST");
-      return { lines: out, state: s };
-    }
+    if (!row) return { err: `INVALID LINE NUMBER ${line} - DISPLAY AVAILABILITY (AN) FIRST` };
     const classEntry = row.classes.find((c) => c.code === cls);
-    if (!classEntry) {
-      out.push(`CLASS ${cls} NOT OFFERED ON LINE ${line} - NO AVAILABILITY`);
-      return { lines: out, state: s };
-    }
+    if (!classEntry) return { err: `CLASS ${cls} NOT OFFERED ON LINE ${line} - NO AVAILABILITY` };
     const waitlist = classEntry.status === "0";
     const seg: Segment = {
       carrier: row.carrier,
@@ -920,23 +962,245 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       depTime: row.depTime,
       arrTime: row.arrTime,
       status: waitlist ? "HL" : "HK",
+      accessCode: accessCodeFor(row.access, waitlist),
+      waitlistPriority: waitlist ? priority : undefined,
+      segType: "FLIGHT",
     };
-    s.activePNR.segments.push(seg);
-    const idx = getElements(s.activePNR).find((e) => e.type === "SEG" && e.text.includes(seg.flightNo))?.index;
-    out.push(
-      ` ${idx}  ${seg.carrier} ${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.date}  ${nStr}  ${seg.origin}${seg.dest}  ${seg.status}${nStr}  ${seg.depTime}  ${seg.arrTime}`
-    );
-    if (waitlist) out.push(" *** SOLD INTO WAITLIST - CLASS SHOWED 0 SEATS ***");
+    return { seg, waitlist };
+  }
+
+  // Dual City Pair sell: SS1F2*C12 -- one class/line from the first
+  // availability display, another class/line from the second (e.g. after
+  // an AN...*... dual-leg display). Real syntax per the handout.
+  const ssDualMatch = cmd.match(/^SS(\d+)([A-Z])(\d+)\*([A-Z])(\d+)$/);
+  if (ssDualMatch) {
+    const [, nStr, cls1, l1, cls2, l2] = ssDualMatch;
+    const r1 = sellOneLine(nStr, cls1, parseInt(l1, 10));
+    if (r1.err) {
+      out.push(r1.err);
+      return { lines: out, state: s };
+    }
+    const r2 = sellOneLine(nStr, cls2, parseInt(l2, 10));
+    if (r2.err) {
+      out.push(r2.err);
+      return { lines: out, state: s };
+    }
+    [r1, r2].forEach((r) => {
+      s.activePNR.segments.push(r.seg!);
+      const idx = getElements(s.activePNR).filter((e) => e.type === "SEG").slice(-1)[0]?.index;
+      out.push(` ${idx}  ${r.seg!.carrier} ${pad(r.seg!.flightNo, 4)} ${r.seg!.bookClass}  ${r.seg!.date}  ${r.seg!.origin}${r.seg!.dest}  ${r.seg!.accessCode}1  ${r.seg!.depTime}  ${r.seg!.arrTime}`);
+      if (r.waitlist) out.push(" *** SOLD INTO WAITLIST - CLASS SHOWED 0 SEATS ***");
+    });
     return { lines: out, state: s };
   }
 
-  // NM<n>SMITH/JOHN MR
-  const nmMatch = raw.match(/^NM\d+([A-Za-z]+)\/([A-Za-z]+)(?:\s+(.+))?$/);
-  if (nmMatch) {
-    const [, last, first, title] = nmMatch;
-    s.activePNR.names.push({ last: last.toUpperCase(), first: first.toUpperCase(), title: title?.toUpperCase() });
-    const idx = getElements(s.activePNR).filter((e) => e.type === "NM").slice(-1)[0]?.index;
-    out.push(` ${idx}.${last.toUpperCase()}/${first.toUpperCase()}${title ? " " + title.toUpperCase() : ""}`);
+  // SS command: SS1Y1 (sell n, class, from availability line), optionally
+  // with a trailing "/<priority code>" when the line is waitlist-only
+  // (e.g. SS2F3/PE) -- the airline-specific waitlist priority code.
+  const ssMatch = cmd.match(/^SS(\d+)([A-Z])(\d+)(?:\/([A-Z0-9]{1,3}))?$/);
+  if (ssMatch) {
+    const [, nStr, cls, lineStr, priority] = ssMatch;
+    const line = parseInt(lineStr, 10);
+    const r = sellOneLine(nStr, cls, line, priority);
+    if (r.err) {
+      out.push(r.err);
+      return { lines: out, state: s };
+    }
+    if (!r.waitlist && priority) {
+      out.push(`PRIORITY CODE "/${priority}" IGNORED - LINE ${line} CLASS ${cls} IS ALREADY CONFIRMED (NOT ON WAITLIST)`);
+    }
+    const seg = r.seg!;
+    s.activePNR.segments.push(seg);
+    const idx = getElements(s.activePNR).filter((e) => e.type === "SEG").slice(-1)[0]?.index;
+    out.push(
+      ` ${idx}  ${seg.carrier} ${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.date}  ${nStr}  ${seg.origin}${seg.dest}  ${seg.accessCode}${nStr}${seg.waitlistPriority ? "/" + seg.waitlistPriority : ""}  ${seg.depTime}  ${seg.arrTime}`
+    );
+    if (r.waitlist) out.push(" *** SOLD INTO WAITLIST - CLASS SHOWED 0 SEATS *** TYPE RTSVC FOR SERVICE INFO");
+    return { lines: out, state: s };
+  }
+
+  // SIARNK -- Arrival Unknown segment: an information segment that keeps
+  // itinerary continuity when the passenger changes transport mode between
+  // two points outside the PNR's flight segments.
+  if (cmd === "SIARNK") {
+    s.activePNR.segments.push({
+      carrier: "", flightNo: "", bookClass: "", date: "", origin: "", dest: "", depTime: "", arrTime: "",
+      status: "OK", segType: "ARNK",
+    });
+    const idx = getElements(s.activePNR).filter((e) => e.type === "SEG").slice(-1)[0]?.index;
+    out.push(` ${idx}  ARNK`);
+    return { lines: out, state: s };
+  }
+
+  // RTSVC -- display flight service info for the most recently sold segment
+  // (shown after a waitlisted sell in the real system, per the handout).
+  if (cmd === "RTSVC") {
+    const segs = s.activePNR.segments.filter((sg) => sg.segType !== "ARNK" && sg.segType !== "OPEN");
+    const last = segs[segs.length - 1];
+    if (!last) {
+      out.push("NO SEGMENT ON FILE");
+      return { lines: out, state: s };
+    }
+    out.push(`** SERVICE INFORMATION ** ${last.carrier}${last.flightNo} ${last.date} ${last.origin}${last.dest}`);
+    out.push(`  STATUS: ${last.status === "HL" ? "WAITLISTED" : "CONFIRMED"} (${last.accessCode}${last.waitlistPriority ? "/" + last.waitlistPriority : ""})`);
+    out.push("  MEAL: NOT SPECIFIED   SEAT: NOT ASSIGNED (USE SM/ST)");
+    return { lines: out, state: s };
+  }
+
+  // SOAFC8AUGCDGMNL -- Open Flight Segment: airline code, class, an
+  // optional fictitious date (ddMON), and the origin/destination. Maintains
+  // segment continuity for pricing/ticketing when the exact date isn't
+  // known yet.
+  const soMatch = cmd.match(/^SO([A-Z]{2})([A-Z])(?:(\d{1,2}[A-Z]{3}))?([A-Z]{3})([A-Z]{3})$/);
+  if (soMatch) {
+    const [, carrier, cls, dateRaw, origin, dest] = soMatch;
+    const dateCode = dateRaw ? dateRaw.replace(/^(\d)([A-Z])/, "0$1$2") : undefined;
+    if (dateCode && !MONTHS.includes(dateCode.slice(2))) {
+      out.push("INVALID MONTH - USE 3 LETTER CODE (JAN,FEB,...)");
+      return { lines: out, state: s };
+    }
+    s.activePNR.segments.push({
+      carrier, flightNo: "OPEN", bookClass: cls, date: dateCode ?? "", origin, dest,
+      depTime: "", arrTime: "", status: "OK", segType: "OPEN",
+    });
+    const idx = getElements(s.activePNR).filter((e) => e.type === "SEG").slice(-1)[0]?.index;
+    out.push(` ${idx}  ${carrier}OPEN  ${cls}  ${dateCode ?? "(NO DATE)"}  ${origin}${dest}`);
+    if (!dateCode) out.push("  NOTE: A FICTITIOUS DATE IS RECOMMENDED FOR PRICING AND TICKETING");
+    return { lines: out, state: s };
+  }
+
+  // NM<n><SURNAME>/<FIRST> <TITLE>[(CHD/ddMMMyy)|(INF[surname]/first/ddMMMyy)|(INS)]
+  //   [/<FIRST2> <TITLE2>...] -- one family-name entry, optionally holding
+  // several passengers sharing that surname (NM2REYES/HANS MR/HEIDI MS),
+  // a child modifier, or an attached infant, per the handout's Name Element
+  // and Infant's Name tables.
+  const nmHeadMatch = raw.match(/^NM(\d+)([A-Za-z]+)\s*\/\s*(.+)$/i);
+  if (nmHeadMatch) {
+    const [, countStr, surnameRaw, bodyRaw] = nmHeadMatch;
+    const surname = surnameRaw.toUpperCase();
+    // Protect slashes that fall inside parentheses (e.g. "(INF/PAULINE/01NOV20)")
+    // before splitting the rest of the entry on "/".
+    let protectedBody = "";
+    let depth = 0;
+    for (const ch of bodyRaw) {
+      if (ch === "(") depth++;
+      if (ch === ")") depth--;
+      protectedBody += ch === "/" && depth > 0 ? "\u0001" : ch;
+    }
+    const chunks = protectedBody.split("/").map((p) => p.replace(/\u0001/g, "/").trim());
+    const added: Name[] = [];
+    let formatError: string | null = null;
+    chunks.forEach((chunk) => {
+      if (formatError || !chunk) return;
+      const m = chunk.match(/^([A-Za-z]+)(?:\s+([A-Za-z]+))?(?:\s*\(([^)]*)\))?$/);
+      if (!m) {
+        formatError = `FORMAT INVALID - COULD NOT READ "${chunk}"`;
+        return;
+      }
+      const [, first, titleRaw, modifierRaw] = m;
+      const n: Name = { last: surname, first: first.toUpperCase(), title: titleRaw?.toUpperCase() };
+      if (modifierRaw) {
+        const mod = modifierRaw.trim().toUpperCase();
+        if (mod.startsWith("CHD/")) {
+          n.paxType = "CHD";
+          n.childDob = mod.slice(4).trim();
+        } else if (mod.startsWith("INF/")) {
+          const [infFirst, infDob] = mod.slice(4).split("/").map((x) => x.trim());
+          n.infant = { last: surname, first: infFirst, dob: infDob ?? "" };
+        } else if (mod.startsWith("INF")) {
+          // INF<SURNAME>/<FIRST>/<DOB> -- infant with a different surname
+          const rest = mod.slice(3);
+          const [infLast, infFirst, infDob] = rest.split("/").map((x) => x.trim());
+          n.infant = { last: infLast, first: infFirst ?? "", dob: infDob ?? "" };
+        } else if (mod === "INS") {
+          n.paxType = "INF";
+        } else {
+          formatError = `UNKNOWN MODIFIER "(${modifierRaw})" - USE (CHD/ddMMMyy), (INF/first/ddMMMyy) OR (INS)`;
+          return;
+        }
+      }
+      added.push(n);
+    });
+    if (formatError) {
+      out.push(formatError);
+      return { lines: out, state: s };
+    }
+    if (added.length === 0) {
+      out.push("FORMAT INVALID - EXPECTED NM<n><SURNAME>/<FIRST> <TITLE>");
+      return { lines: out, state: s };
+    }
+    const expected = parseInt(countStr, 10);
+    if (expected !== added.length) {
+      out.push(`NOTE: ENTRY SAID ${expected} PASSENGER(S) BUT ${added.length} NAME(S) WERE READ - CHECK YOUR SLASH COUNT`);
+    }
+    added.forEach((n) => s.activePNR.names.push(n));
+    const allIdx = getElements(s.activePNR).filter((e) => e.type === "NM");
+    added.forEach((_, k) => {
+      const el = allIdx[allIdx.length - added.length + k];
+      out.push(` ${el.index}.${el.text}`);
+    });
+    if (added.some((n) => n.paxType === "CHD")) out.push(" (OSI ELEMENT AUTO-CREATED FOR CHILD NAME)");
+    return { lines: out, state: s };
+  }
+
+  // SR INFT - <freeflow> /P<n> -- request a seat for an infant registered
+  // as its own passenger (INS), associating it with adult/passenger n.
+  const srInftMatch = raw.match(/^SR\s+INFT\s*[-\u2013]\s*(.+)\/P(\d+)$/i);
+  if (srInftMatch) {
+    const [, freeflow, paxStr] = srInftMatch;
+    const idxNm = s.activePNR.names[parseInt(paxStr, 10) - 1];
+    if (!idxNm) {
+      out.push(`NO PASSENGER NUMBER P${paxStr} ON THE PNR`);
+      return { lines: out, state: s };
+    }
+    s.activePNR.osi.push(`SR INFT ${freeflow.trim()} - P${paxStr}`);
+    const idx = getElements(s.activePNR).filter((e) => e.type === "OSI").slice(-1)[0]?.index;
+    out.push(` ${idx}.SSR INFT HK1 ${freeflow.trim().toUpperCase()} /P${paxStr}`);
+    return { lines: out, state: s };
+  }
+
+  // NU<n>/<first> <title>[(CHD/ddMMMyy)|(INF.../ddMMMyy)]  -- Name Update:
+  // modify the first name (and CHD/INF modifier) of an existing passenger
+  // without recreating the PNR. NU<n>/ with nothing after the slash clears
+  // any CHD/INF modifier on that passenger.
+  const nuMatch = raw.match(/^NU(\d+)\/(.*)$/i);
+  if (nuMatch) {
+    const [, nStr, bodyRaw] = nuMatch;
+    const idx = parseInt(nStr, 10) - 1;
+    const existing = s.activePNR.names[idx];
+    if (!existing) {
+      out.push(`NO PASSENGER NUMBER ${nStr} ON THE PNR`);
+      return { lines: out, state: s };
+    }
+    const body = bodyRaw.trim();
+    if (!body) {
+      // NU4/ -- deletes an infant name or passenger type code attached
+      existing.paxType = undefined;
+      existing.childDob = undefined;
+      existing.infant = undefined;
+      out.push(` ${idx + 1}.${existing.last}/${existing.first}${existing.title ? " " + existing.title : ""} - CHD/INF MODIFIER REMOVED`);
+      return { lines: out, state: s };
+    }
+    const m = body.match(/^([A-Za-z]+)?(?:\s+([A-Za-z]+))?(?:\s*\(([^)]*)\))?$/);
+    if (!m) {
+      out.push(`FORMAT INVALID - COULD NOT READ "${body}"`);
+      return { lines: out, state: s };
+    }
+    const [, first, titleRaw, modifierRaw] = m;
+    if (first) existing.first = first.toUpperCase();
+    if (titleRaw) existing.title = titleRaw.toUpperCase();
+    if (modifierRaw) {
+      const mod = modifierRaw.trim().toUpperCase();
+      if (mod.startsWith("CHD/")) {
+        existing.paxType = "CHD";
+        existing.childDob = mod.slice(4).trim();
+      } else if (mod.startsWith("INF/")) {
+        const [infFirst, infDob] = mod.slice(4).split("/").map((x) => x.trim());
+        existing.infant = { last: existing.last, first: infFirst, dob: infDob ?? "" };
+      }
+    }
+    const el = getElements(s.activePNR).find((e) => e.type === "NM" && s.activePNR.names[idx] === existing);
+    out.push(` ${idx + 1}.${existing.last}/${existing.first}${existing.title ? " " + existing.title : ""}${existing.paxType === "CHD" && existing.childDob ? `(CHD/${existing.childDob})` : ""}${existing.infant ? `(INF/${existing.infant.first}/${existing.infant.dob})` : ""} UPDATED`);
     return { lines: out, state: s };
   }
 
@@ -1006,12 +1270,12 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
   // that TST with TTP. TKOK/TKTL is a separate thing -- just an arrangement
   // to ticket by some point, not a price and not a ticket.
   if (cmd === "FXP") {
-    if (s.activePNR.segments.length === 0) {
+    if (s.activePNR.segments.filter((sg) => sg.segType !== "ARNK").length === 0) {
       out.push("NO SEGMENTS IN PNR - SELL (SS) BEFORE PRICING");
       return { lines: out, state: s };
     }
     let base = 0;
-    s.activePNR.segments.forEach((seg, i) => {
+    s.activePNR.segments.filter((seg) => seg.segType !== "ARNK").forEach((seg, i) => {
       const r = seededRand(seg.flightNo + seg.bookClass, i);
       base += 120 + (r % 480);
     });
@@ -1021,7 +1285,9 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const tstId = `T${String(s.activePNR.tst.length + 1).padStart(2, "0")}`;
     s.activePNR.tst.push({ id: tstId, base, tax: yq + xt, taxCode: "YQ/XT", total, currency: "USD", used: false });
     out.push("** FARE QUOTE - FXP **");
-    s.activePNR.segments.forEach((seg) => out.push(`  ${seg.carrier}${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.origin}${seg.dest}`));
+    s.activePNR.segments
+      .filter((seg) => seg.segType !== "ARNK")
+      .forEach((seg) => out.push(`  ${seg.segType === "OPEN" ? seg.carrier + "OPEN" : seg.carrier + pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.origin}${seg.dest}`));
     out.push(`  FARE          USD ${base.toFixed(2)}`);
     out.push(`  TAX   YQ      USD ${yq.toFixed(2)}`);
     out.push(`  TAX   XT      USD ${xt.toFixed(2)}`);
@@ -1174,12 +1440,43 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // XE<n> - cancel element
-  const xeMatch = cmd.match(/^XE(\d+)$/);
+  // XE<n> - cancel a single element | XE<a>-<b> - cancel a range |
+  // XE<a>,<b>,... - cancel selected elements (handout's "Canceling PNR
+  // Elements" table: XE4 / XE3-6 / XE5,7).
+  const xeMatch = cmd.match(/^XE([\d,-]+)$/);
   if (xeMatch) {
-    const idx = parseInt(xeMatch[1], 10);
-    const ok = removeElement(s.activePNR, idx);
-    out.push(ok ? `ELEMENT ${idx} CANCELLED` : `NO ELEMENT NUMBER ${idx} TO CANCEL`);
+    const spec = xeMatch[1];
+    const indices = new Set<number>();
+    let badToken: string | null = null;
+    spec.split(",").forEach((tok) => {
+      if (badToken) return;
+      const rangeM = tok.match(/^(\d+)-(\d+)$/);
+      if (rangeM) {
+        const a = parseInt(rangeM[1], 10);
+        const b = parseInt(rangeM[2], 10);
+        if (a > b) { badToken = tok; return; }
+        for (let i = a; i <= b; i++) indices.add(i);
+      } else if (/^\d+$/.test(tok)) {
+        indices.add(parseInt(tok, 10));
+      } else {
+        badToken = tok;
+      }
+    });
+    if (badToken) {
+      out.push(`FORMAT INVALID - "${badToken}" - USE XE<n>, XE<a>-<b> (RANGE), OR XE<a>,<b> (SELECTED)`);
+      return { lines: out, state: s };
+    }
+    // Cancel highest index first so lower indices stay valid as the
+    // element list is renumbered after each removal.
+    const sorted = [...indices].sort((a, b) => b - a);
+    const cancelled: number[] = [];
+    const missing: number[] = [];
+    sorted.forEach((idx) => {
+      if (removeElement(s.activePNR, idx)) cancelled.push(idx);
+      else missing.push(idx);
+    });
+    if (cancelled.length > 0) out.push(`ELEMENT(S) ${cancelled.sort((a, b) => a - b).join(",")} CANCELLED`);
+    if (missing.length > 0) out.push(`NO ELEMENT NUMBER ${missing.sort((a, b) => a - b).join(",")} TO CANCEL`);
     return { lines: out, state: s };
   }
 
@@ -1211,9 +1508,30 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // ER / ET - end transaction. Real Amadeus requires 5 mandatory elements
-  // before it will save: name, segment, a contact, a ticketing arrangement,
-  // and Received From.
+  // RT/<SURNAME> - retrieve saved PNR(s) by family name
+  const rtName = cmd.match(/^RT\/([A-Z]+)$/);
+  if (rtName) {
+    const surname = rtName[1];
+    const matches = Object.values(s.savedPNRs).filter((p) => p.names.some((n) => n.last === surname));
+    if (matches.length === 0) {
+      out.push(`NOT FOUND - NO SAVED PNR WITH FAMILY NAME ${surname}`);
+      return { lines: out, state: s };
+    }
+    if (matches.length > 1) {
+      out.push(`${matches.length} PNR(S) FOUND WITH FAMILY NAME ${surname} - RETRIEVE BY LOCATOR INSTEAD:`);
+      matches.forEach((p) => out.push(`  ${p.locator}`));
+      return { lines: out, state: s };
+    }
+    const found = matches[0];
+    if (pnrHasContent(s.activePNR) && !s.activePNR.locator) {
+      out.push("ENTRY NOT VALID - THIS AREA HAS AN UNSAVED PNR IN PROGRESS");
+      out.push("  ER/ET TO SAVE IT, IG TO DISCARD IT, OR JUMP TO A FREE AREA (E.G. JB)");
+      return { lines: out, state: s };
+    }
+    s.activePNR = found;
+    out.push(...renderPNR(found));
+    return { lines: out, state: s };
+  }
   //   ER = end transaction AND REDISPLAY: PNR saved, stays on screen so you can
   //        keep working on it.
   //   ET = end transaction: PNR saved and the area is wiped, ready for the next
@@ -1244,10 +1562,35 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // IG - ignore
+  // IG - ignore. During creation (never saved -- no locator yet), all
+  // elements are discarded. When modifying an existing (already-saved) PNR,
+  // IG instead ignores the updates and returns the PNR to its original,
+  // last-saved form -- per the handout's IGNORE TRANSACTION section.
   if (cmd === "IG") {
-    s.activePNR = emptyPNR();
-    out.push(`IGNORED - AREA ${s.area} CLEARED`);
+    if (s.activePNR.locator && s.savedPNRs[s.activePNR.locator]) {
+      const original = s.savedPNRs[s.activePNR.locator];
+      s.activePNR = original;
+      out.push(`IGNORED - ${original.locator}`);
+      out.push(...renderPNR(original));
+    } else {
+      s.activePNR = emptyPNR();
+      out.push(`IGNORED - AREA ${s.area} CLEARED`);
+    }
+    return { lines: out, state: s };
+  }
+
+  // IR - after ending a PNR, redisplay the airline's own record locator
+  // (a partial copy of the PNR showing each segment with its airline RLOC),
+  // per the handout's IGNORE and REDISPLAY section.
+  if (cmd === "IR") {
+    const segs = s.activePNR.segments.filter((sg) => sg.segType === "FLIGHT");
+    if (segs.length === 0) {
+      out.push("NO AIR SEGMENT ON FILE TO SHOW AN AIRLINE RECORD LOCATOR FOR");
+      return { lines: out, state: s };
+    }
+    segs.forEach((seg) => {
+      out.push(`  ${seg.carrier} ${pad(seg.flightNo, 4)} ${seg.bookClass}  ${seg.date}  ${seg.origin}${seg.dest}  ${seg.accessCode ?? seg.status}1  ${seg.depTime}  ${seg.arrTime}  ${seg.carrier}/${genLocator()}`);
+    });
     return { lines: out, state: s };
   }
 
