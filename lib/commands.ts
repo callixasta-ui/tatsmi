@@ -1,7 +1,7 @@
 // A learning-purpose simulator of Amadeus Basic Access ("cryptic") commands.
 // Entry syntax, mandatory-element rules, and screen shapes are modeled on
 // real Amadeus cryptic entries (AN/SN/TN/DO/AC/SS/NM/AP-family/TK/RF/RT/XE/
-// DAC-DAN/FQC/FXP/SM-ST, etc), including the flight-information-display family
+// DAC-DAN/FXP/SM-ST, etc), including the flight-information-display family
 // (availability / schedule / timetable / flight info) from STI handout
 // TH2106. It's a simplified training subset, not the full system -- see the
 // in-app HE listing for what's covered. All data stays local; nothing here
@@ -436,37 +436,6 @@ export interface CmdResult {
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 const DOW_CODES = ["SU","MO","TU","WE","TH","FR","SA"];
 
-// FQC -- real Amadeus currency-conversion entry. Amadeus prices/tickets in a
-// single "office" currency (this trainer's office currency is USD, matching
-// FXP's output), but the system does handle other currencies through FQC
-// (Bankers Selling Rate conversion) and multi-currency fare display. Rates
-// below are fixed illustrative BSR-style rates for training, not a live feed
-// -- same "deterministic, not connected to a live system" spirit as AN/SN.
-const CCY_PER_USD: Record<string, number> = {
-  USD: 1,
-  EUR: 0.92,
-  GBP: 0.79,
-  PHP: 56.5,
-  JPY: 149.5,
-  AUD: 1.52,
-  SGD: 1.34,
-  HKD: 7.82,
-  CAD: 1.36,
-  NZD: 1.66,
-};
-const CCY_NAMES: Record<string, string> = {
-  USD: "US DOLLAR",
-  EUR: "EURO",
-  GBP: "POUND STERLING",
-  PHP: "PHILIPPINE PESO",
-  JPY: "JAPANESE YEN",
-  AUD: "AUSTRALIAN DOLLAR",
-  SGD: "SINGAPORE DOLLAR",
-  HKD: "HONG KONG DOLLAR",
-  CAD: "CANADIAN DOLLAR",
-  NZD: "NEW ZEALAND DOLLAR",
-};
-
 const CITY_TABLE: Record<string, string> = {
   LON: "LONDON, UNITED KINGDOM",
   BKK: "BANGKOK, THAILAND",
@@ -629,7 +598,6 @@ function helpTopic(topic: string): string[] {
     XE: "XE<n> -- cancel element number n, using the numbering shown by RT.",
     DAC: "DAC<code> -- decode a city/airport code to its name.",
     DAN: "DAN <text> -- encode a city name to its code.",
-    FQC: "FQC<amount><currency>[/<currency>] -- currency conversion (BSR). e.g. FQC100USD (converts to office currency USD) or FQC100USD/PHP (converts straight between the two). Demo table: USD EUR GBP PHP JPY AUD SGD HKD CAD NZD, fixed training rates, not a live feed.",
     FXP: "FXP -- fare quote for every segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
     FP: "FP CASH | FP CHEQUE | FP CC<2-letter vendor code><card number>/<MMYY> -- form of payment, e.g. FP CASH or FPCCVI4444333322221111/0128. Required before TTP will issue.",
     TTP: "TTP -- Ticketing Transactional Print: issues an actual ticket for every passenger on a SAVED PNR (needs a locator from ER/ET), using the latest unused TST and the FP on file. Refuses if any segment is still waitlisted (HL).",
@@ -727,7 +695,6 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "IG                            IGNORE / CLEAR ACTIVE PNR",
       "JA..JF / JO                   JUMP TO WORK AREA A-F / SHOW AREA STATUS",
       "DAC<CODE> / DAN <TEXT>        DECODE / ENCODE A CITY",
-      "FQC<AMT><CUR>[/<CUR>]         CURRENCY CONVERSION (BSR), e.g. FQC100USD/PHP",
       "CLS                           CLEAR SCREEN (trainer convenience only)",
       "HE <TOPIC>                    HELP ON ONE ENTRY, e.g. HE TKTL",
       "--------------------------------------------------"
@@ -1342,45 +1309,6 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const needle = danMatch[1].trim().toUpperCase();
     const found = Object.entries(CITY_TABLE).find(([, name]) => name.includes(needle));
     out.push(found ? `${needle} ${found[0]}` : `${needle} NO MATCH (DEMO TABLE LIMITED)`);
-    return { lines: out, state: s };
-  }
-
-  // FQC<amount><currency>[/<currency>] -- real Amadeus currency conversion.
-  // No second currency: converts into the office currency (USD in this
-  // trainer, same as FXP). With a second currency: converts straight between
-  // the two, neither has to be the office currency.
-  const fqcMatch = cmd.match(/^FQC\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Z]{3})(?:\s*\/\s*([A-Z]{3}))?$/);
-  if (fqcMatch) {
-    const amount = parseFloat(fqcMatch[1]);
-    const from = fqcMatch[2];
-    const to = fqcMatch[3] ?? "USD";
-    if (!CCY_PER_USD[from] || !CCY_PER_USD[to]) {
-      const bad = !CCY_PER_USD[from] ? from : to;
-      out.push(`UNKNOWN CURRENCY CODE ${bad} -- DEMO TABLE LIMITED TO ${Object.keys(CCY_PER_USD).join(" ")}`);
-      return { lines: out, state: s };
-    }
-    if (from === to) {
-      out.push(`${from} AND ${to} ARE THE SAME CURRENCY -- NOTHING TO CONVERT`);
-      return { lines: out, state: s };
-    }
-    const rate = CCY_PER_USD[to] / CCY_PER_USD[from];
-    const converted = amount * rate;
-    const roundedFares = Math.ceil(converted);
-    const roundedOther = Math.round(converted * 100) / 100;
-    const truncated = Math.floor(converted * 100) / 100;
-    const today = new Date();
-    const effDate = `${String(today.getDate()).padStart(2, "0")}${MONTHS[today.getMonth()]}${String(today.getFullYear()).slice(-2)}`;
-    out.push(`FQC${fqcMatch[1]}${from}${fqcMatch[3] ? "/" + to : ""}`);
-    out.push(`BSR CONVERSION OF ${from} TO ${to}`);
-    out.push(`${to} ${roundedFares.toFixed(2)} - ROUNDED AS FARES`);
-    out.push(`${to} ${roundedOther.toFixed(2)} - ROUNDED AS OTHER CHARGES`);
-    out.push(`${to} ${truncated.toFixed(2)} - AMOUNT TRUNCATED`);
-    out.push(`BSR USED 1 ${from} = ${rate.toFixed(8)} ${to}`);
-    out.push(`EFF ${effDate}`);
-    out.push(`ROUNDING OF FARES UP TO 1.00 ${to}`);
-    out.push(`ROUNDING OF OTHER CHARGES UP TO 0.01 ${to}`);
-    out.push(`${from} - ${CCY_NAMES[from]}`);
-    out.push(`${to} - ${CCY_NAMES[to]}`);
     return { lines: out, state: s };
   }
 

@@ -113,7 +113,6 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     section: "REFERENCE & TRAINER-ONLY",
     rows: [
       { cmd: "DACLON / DAN BANGKOK", desc: "Decode a city code / encode a city name" },
-      { cmd: "FQC100USD/PHP", desc: "Currency conversion (BSR) -- FQC100USD converts to the office currency (USD) if no second currency is given" },
       { cmd: "HE / HE TKTL", desc: "Help list, or help on one entry" },
       { cmd: "CLS", desc: "Clear the screen (trainer convenience, not real Amadeus)" },
     ],

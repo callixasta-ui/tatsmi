@@ -70,7 +70,6 @@ MANAGING THE PNR
 - IG -- discard the active PNR without saving.
 - JA, JB, JC, JD, JE, JF -- jump to work area A-F. Each area keeps its own PNR in progress and its own availability display, so a learner can work several bookings side by side. JO shows the status of every area. The trainer won't let RT<LOCATOR> overwrite an unsaved PNR: end it (ER/ET), ignore it (IG), or retrieve in a different area.
 - DAC<code> -- decode a city/airport code to its name. DAN <text> -- the reverse, name to code.
-- FQC<amount><currency>[/<currency>] -- currency conversion (BSR-style). e.g. FQC100USD converts to the office currency, which is USD in this trainer, matching FXP's output; FQC100USD/PHP converts straight between the two given currencies. This is real Amadeus syntax and a real distinction: FXP always prices/tickets in the office's own currency (it doesn't take a currency argument), and FQC is the separate entry for converting an amount between currencies. Demo currency table: USD, EUR, GBP, PHP, JPY, AUD, SGD, HKD, CAD, NZD, using fixed rates for training, not a live feed.
 
 OTHER TRAINER FEATURES (not real Amadeus commands -- mention only if relevant)
 - CLS clears the visible screen without touching the PNR.
