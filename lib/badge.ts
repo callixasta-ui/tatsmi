@@ -29,9 +29,58 @@ const TIERS: Tier[] = [
   { name: "GOLD", light: "#fff2bd", mid: "#e8b567", dark: "#9c6a1a" },
   { name: "PLATINUM", light: "#f2fbff", mid: "#a6c8de", dark: "#587a94" },
   { name: "DIAMOND", light: "#e6f7ff", mid: "#7fb2ff", dark: "#4a3fb0" },
+  { name: "OBSIDIAN", light: "#e3d8ff", mid: "#8a63d9", dark: "#241a3d" },
 ];
 
 const FONT = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+
+// Small "verified by Amy" accent chip, drawn once in the empty gap below the
+// tagline. Decorative only -- the level number/tier stays the badge's focal
+// point, this is just a wink in the corner. Cached across calls so repeat
+// badges (different levels/names in the same session) don't re-fetch it.
+const MASCOT_SRC = "/mascot-seal.png";
+let mascotImg: HTMLImageElement | null = null;
+let mascotLoad: Promise<HTMLImageElement> | null = null;
+
+function loadMascot(): Promise<HTMLImageElement> {
+  if (mascotImg && mascotImg.complete && mascotImg.naturalWidth > 0) return Promise.resolve(mascotImg);
+  if (mascotLoad) return mascotLoad;
+  mascotLoad = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      mascotImg = img;
+      resolve(img);
+    };
+    img.onerror = reject;
+    img.src = MASCOT_SRC;
+  });
+  return mascotLoad;
+}
+
+function paintMascotChip(ctx: CanvasRenderingContext2D, tier: Tier, img: HTMLImageElement) {
+  const cx = C;
+  const cy = 758;
+  const r = 46;
+  ctx.save();
+  // soft backing disc so the chip reads clearly against the centre disc
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+  ctx.restore();
+  // thin metal ring so it reads as a stamped accent, not a sticker
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = tier.mid;
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
 
 function metal(ctx: CanvasRenderingContext2D, t: Tier, x0: number, y0: number, x1: number, y1: number) {
   const g = ctx.createLinearGradient(x0, y0, x1, y1);
@@ -268,6 +317,19 @@ export function drawBadge(canvas: HTMLCanvasElement, opts: BadgeOptions) {
   ctx.fillText("Certified in GDS cryptic entries", C, 702);
 
   ctx.textAlign = "left";
+
+  // 7. Small mascot accent in the gap below the tagline -- a wink, not the
+  // point of the badge. Paint immediately if cached; otherwise paint it in
+  // once it loads (the canvas element stays put while the badge is shown).
+  if (mascotImg && mascotImg.complete && mascotImg.naturalWidth > 0) {
+    paintMascotChip(ctx, tier, mascotImg);
+  } else {
+    loadMascot()
+      .then((img) => paintMascotChip(ctx, tier, img))
+      .catch(() => {
+        /* decorative only -- badge still works without it */
+      });
+  }
 }
 
 export function downloadCanvasPng(canvas: HTMLCanvasElement, filename: string) {
