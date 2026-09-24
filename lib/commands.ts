@@ -358,6 +358,12 @@ function buildAvailability(dateCode: string, origin: string, dest: string, q: Av
     if (q.classFilter) classes = classes.filter((c) => c.code === q.classFilter);
     if (classes.length === 0) continue; // nothing sellable under these filters, real AN just skips the line
 
+    // Real Amadeus: querying a multi-airport metro code (LON, NYC, PAR...)
+    // returns each flight tagged with the specific airport it actually
+    // uses, not the bare city code repeated on every line.
+    const originResolved = resolveAirport(origin, r).airport;
+    const destResolved = resolveAirport(dest, r >>> 3).airport;
+
     rows.push({
       line: line++,
       carrier,
@@ -365,9 +371,9 @@ function buildAvailability(dateCode: string, origin: string, dest: string, q: Av
       classes,
       depTime: base.depTime,
       arrTime: base.arrTime,
-      origin,
+      origin: originResolved,
       originTerm: base.originTerm,
-      dest,
+      dest: destResolved,
       destTerm: base.destTerm,
       date: dateCode,
       stops: base.stops,
@@ -388,6 +394,8 @@ function buildTimetable(dateCode: string, origin: string, dest: string): Timetab
     const flightNo = String(100 + (r % 800));
     const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
     const eff = shiftDate(dateCode, -((r >>> 10) % 120));
+    const originResolved = resolveAirport(origin, r).airport;
+    const destResolved = resolveAirport(dest, r >>> 3).airport;
     rows.push({
       line: i,
       carrier,
@@ -395,9 +403,9 @@ function buildTimetable(dateCode: string, origin: string, dest: string): Timetab
       dow: DOW_PATTERNS[(r >>> 5) % DOW_PATTERNS.length],
       depTime: base.depTime,
       arrTime: base.arrTime,
-      origin,
+      origin: originResolved,
       originTerm: base.originTerm,
-      dest,
+      dest: destResolved,
       destTerm: base.destTerm,
       stops: base.stops,
       effective: eff,
@@ -445,38 +453,264 @@ export interface CmdResult {
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 const DOW_CODES = ["SU","MO","TU","WE","TH","FR","SA"];
 
-const CITY_TABLE: Record<string, string> = {
-  LON: "LONDON, UNITED KINGDOM",
-  BKK: "BANGKOK, THAILAND",
-  NYC: "NEW YORK, USA",
-  HKG: "HONG KONG",
-  SIN: "SINGAPORE",
-  PAR: "PARIS, FRANCE",
-  MNL: "MANILA, PHILIPPINES",
-  CEB: "CEBU, PHILIPPINES",
-  TYO: "TOKYO, JAPAN",
-  SYD: "SYDNEY, AUSTRALIA",
-  KUL: "KUALA LUMPUR, MALAYSIA",
-  HKT: "PHUKET, THAILAND",
-  DXB: "DUBAI, UNITED ARAB EMIRATES",
-  DPS: "DENPASAR/BALI, INDONESIA",
-  ICN: "SEOUL, SOUTH KOREA",
-  DOH: "DOHA, QATAR",
-  BOM: "MUMBAI, INDIA",
-  KWI: "KUWAIT, KUWAIT",
+// ---------------------------------------------------------------------------
+// Geography table -- mirrors the real Amadeus distinction between a
+// *metropolitan/city* code (multiple airports may sit under it, e.g. LON,
+// NYC, PAR, TYO) and a specific *airport* code (LHR, JFK, CDG, NRT...).
+// AN/SN/TN accept either kind, same as the real system: query a city code
+// and, if it covers several airports, each flight line comes back tagged
+// with the *actual* airport it uses (not just the city code repeated);
+// query an airport code directly and every line is pinned to that one
+// airport. DAC/DAN both understand the city<->airport relationship.
+// Coverage here is a large curated set of real-world major hubs, still far
+// short of Amadeus's full worldwide database, but big enough that the
+// city/airport mechanics themselves now work the way they do on the real
+// system instead of being flattened into one 18-row demo table.
+// ---------------------------------------------------------------------------
+
+export type LocationType = "CITY" | "AIRPORT";
+
+export interface LocationEntry {
+  code: string;
+  name: string; // display name (city name, or "City/Airport" for an airport)
+  country: string; // full country name
+  countryCode: string; // 2-letter
+  type: LocationType;
+  cityCode?: string; // for AIRPORT entries: the metropolitan city code it belongs to
+}
+
+// Metro (city) codes that cover more than one airport, and which airports
+// belong to them -- the actual gap the old single flat table couldn't
+// represent at all.
+const CITY_AIRPORTS: Record<string, string[]> = {
+  LON: ["LHR", "LGW", "STN", "LTN", "LCY"],
+  NYC: ["JFK", "EWR", "LGA"],
+  PAR: ["CDG", "ORY", "BVA"],
+  TYO: ["NRT", "HND"],
+  CHI: ["ORD", "MDW"],
+  WAS: ["IAD", "DCA", "BWI"],
+  MIL: ["MXP", "LIN", "BGY"],
+  MOW: ["SVO", "DME", "VKO"],
+  OSA: ["KIX", "ITM"],
+  SEL: ["ICN", "GMP"],
+  SAO: ["GRU", "CGH"],
+  RIO: ["GIG", "SDU"],
+  BUE: ["EZE", "AEP"],
+  ROM: ["FCO", "CIA"],
+  STO: ["ARN", "BMA", "NYO"],
+  BER: ["BER"],
 };
 
-const COUNTRY_CODE: Record<string, string> = {
-  LON: "GB", BKK: "TH", NYC: "US", HKG: "HK", SIN: "SG", PAR: "FR", MNL: "PH",
-  CEB: "PH", TYO: "JP", SYD: "AU", KUL: "MY", HKT: "TH", DXB: "AE", DPS: "ID",
-  ICN: "KR", DOH: "QA", BOM: "IN", KWI: "KW",
-};
+const LOCATIONS: Record<string, LocationEntry> = {};
+function addCity(code: string, name: string, country: string, countryCode: string) {
+  LOCATIONS[code] = { code, name, country, countryCode, type: "CITY" };
+}
+function addAirport(code: string, name: string, cityCode: string) {
+  const city = LOCATIONS[cityCode];
+  LOCATIONS[code] = {
+    code,
+    name,
+    country: city?.country ?? "",
+    countryCode: city?.countryCode ?? "XX",
+    type: "AIRPORT",
+    cityCode,
+  };
+}
 
+// -- City / metro codes -----------------------------------------------------
+addCity("LON", "LONDON", "UNITED KINGDOM", "GB");
+addCity("BKK", "BANGKOK", "THAILAND", "TH");
+addCity("NYC", "NEW YORK", "USA", "US");
+addCity("HKG", "HONG KONG", "HONG KONG", "HK");
+addCity("SIN", "SINGAPORE", "SINGAPORE", "SG");
+addCity("PAR", "PARIS", "FRANCE", "FR");
+addCity("MNL", "MANILA", "PHILIPPINES", "PH");
+addCity("CEB", "CEBU", "PHILIPPINES", "PH");
+addCity("TYO", "TOKYO", "JAPAN", "JP");
+addCity("SYD", "SYDNEY", "AUSTRALIA", "AU");
+addCity("KUL", "KUALA LUMPUR", "MALAYSIA", "MY");
+addCity("HKT", "PHUKET", "THAILAND", "TH");
+addCity("DXB", "DUBAI", "UNITED ARAB EMIRATES", "AE");
+addCity("DPS", "DENPASAR/BALI", "INDONESIA", "ID");
+addCity("ICN", "SEOUL", "SOUTH KOREA", "KR");
+addCity("DOH", "DOHA", "QATAR", "QA");
+addCity("BOM", "MUMBAI", "INDIA", "IN");
+addCity("KWI", "KUWAIT", "KUWAIT", "KW");
+addCity("CHI", "CHICAGO", "USA", "US");
+addCity("WAS", "WASHINGTON DC", "USA", "US");
+addCity("MIL", "MILAN", "ITALY", "IT");
+addCity("MOW", "MOSCOW", "RUSSIA", "RU");
+addCity("OSA", "OSAKA", "JAPAN", "JP");
+addCity("SEL", "SEOUL", "SOUTH KOREA", "KR");
+addCity("SAO", "SAO PAULO", "BRAZIL", "BR");
+addCity("RIO", "RIO DE JANEIRO", "BRAZIL", "BR");
+addCity("BUE", "BUENOS AIRES", "ARGENTINA", "AR");
+addCity("ROM", "ROME", "ITALY", "IT");
+addCity("STO", "STOCKHOLM", "SWEDEN", "SE");
+addCity("BER", "BERLIN", "GERMANY", "DE");
+
+// Single-airport major cities (city code == airport code, as on the real
+// system for most of the world's airports).
+const SINGLE_AIRPORT_CITIES: [string, string, string, string][] = [
+  ["LAX", "LOS ANGELES", "USA", "US"],
+  ["SFO", "SAN FRANCISCO", "USA", "US"],
+  ["MIA", "MIAMI", "USA", "US"],
+  ["ATL", "ATLANTA", "USA", "US"],
+  ["DFW", "DALLAS/FORT WORTH", "USA", "US"],
+  ["SEA", "SEATTLE", "USA", "US"],
+  ["BOS", "BOSTON", "USA", "US"],
+  ["DEN", "DENVER", "USA", "US"],
+  ["LAS", "LAS VEGAS", "USA", "US"],
+  ["YYZ", "TORONTO", "CANADA", "CA"],
+  ["YVR", "VANCOUVER", "CANADA", "CA"],
+  ["YUL", "MONTREAL", "CANADA", "CA"],
+  ["MEX", "MEXICO CITY", "MEXICO", "MX"],
+  ["GRU", "SAO PAULO/GUARULHOS", "BRAZIL", "BR"],
+  ["LIM", "LIMA", "PERU", "PE"],
+  ["BOG", "BOGOTA", "COLOMBIA", "CO"],
+  ["SCL", "SANTIAGO", "CHILE", "CL"],
+  ["MAD", "MADRID", "SPAIN", "ES"],
+  ["BCN", "BARCELONA", "SPAIN", "ES"],
+  ["FRA", "FRANKFURT", "GERMANY", "DE"],
+  ["MUC", "MUNICH", "GERMANY", "DE"],
+  ["AMS", "AMSTERDAM", "NETHERLANDS", "NL"],
+  ["BRU", "BRUSSELS", "BELGIUM", "BE"],
+  ["ZRH", "ZURICH", "SWITZERLAND", "CH"],
+  ["GVA", "GENEVA", "SWITZERLAND", "CH"],
+  ["VIE", "VIENNA", "AUSTRIA", "AT"],
+  ["LIS", "LISBON", "PORTUGAL", "PT"],
+  ["DUB", "DUBLIN", "IRELAND", "IE"],
+  ["CPH", "COPENHAGEN", "DENMARK", "DK"],
+  ["OSL", "OSLO", "NORWAY", "NO"],
+  ["HEL", "HELSINKI", "FINLAND", "FI",],
+  ["WAW", "WARSAW", "POLAND", "PL"],
+  ["PRG", "PRAGUE", "CZECH REPUBLIC", "CZ"],
+  ["BUD", "BUDAPEST", "HUNGARY", "HU"],
+  ["ATH", "ATHENS", "GREECE", "GR"],
+  ["IST", "ISTANBUL", "TURKEY", "TR"],
+  ["CAI", "CAIRO", "EGYPT", "EG"],
+  ["JNB", "JOHANNESBURG", "SOUTH AFRICA", "ZA"],
+  ["CPT", "CAPE TOWN", "SOUTH AFRICA", "ZA"],
+  ["NBO", "NAIROBI", "KENYA", "KE"],
+  ["LOS", "LAGOS", "NIGERIA", "NG"],
+  ["ADD", "ADDIS ABABA", "ETHIOPIA", "ET"],
+  ["AUH", "ABU DHABI", "UNITED ARAB EMIRATES", "AE"],
+  ["RUH", "RIYADH", "SAUDI ARABIA", "SA"],
+  ["JED", "JEDDAH", "SAUDI ARABIA", "SA"],
+  ["AMM", "AMMAN", "JORDAN", "JO"],
+  ["TLV", "TEL AVIV", "ISRAEL", "IL"],
+  ["DEL", "DELHI", "INDIA", "IN"],
+  ["BLR", "BANGALORE", "INDIA", "IN"],
+  ["MAA", "CHENNAI", "INDIA", "IN"],
+  ["CCU", "KOLKATA", "INDIA", "IN"],
+  ["KTM", "KATHMANDU", "NEPAL", "NP"],
+  ["DAC", "DHAKA", "BANGLADESH", "BD"],
+  ["CMB", "COLOMBO", "SRI LANKA", "LK"],
+  ["KHI", "KARACHI", "PAKISTAN", "PK"],
+  ["ISB", "ISLAMABAD", "PAKISTAN", "PK"],
+  ["PEK", "BEIJING", "CHINA", "CN"],
+  ["PVG", "SHANGHAI", "CHINA", "CN"],
+  ["CAN", "GUANGZHOU", "CHINA", "CN"],
+  ["SZX", "SHENZHEN", "CHINA", "CN"],
+  ["CTU", "CHENGDU", "CHINA", "CN"],
+  ["TPE", "TAIPEI", "TAIWAN", "TW"],
+  ["MFM", "MACAU", "MACAU", "MO"],
+  ["HAN", "HANOI", "VIETNAM", "VN"],
+  ["SGN", "HO CHI MINH CITY", "VIETNAM", "VN"],
+  ["PNH", "PHNOM PENH", "CAMBODIA", "KH"],
+  ["RGN", "YANGON", "MYANMAR", "MM"],
+  ["VTE", "VIENTIANE", "LAOS", "LA"],
+  ["BWN", "BANDAR SERI BEGAWAN", "BRUNEI", "BN"],
+  ["CGK", "JAKARTA", "INDONESIA", "ID"],
+  ["SUB", "SURABAYA", "INDONESIA", "ID"],
+  ["MEL", "MELBOURNE", "AUSTRALIA", "AU"],
+  ["BNE", "BRISBANE", "AUSTRALIA", "AU"],
+  ["PER", "PERTH", "AUSTRALIA", "AU"],
+  ["AKL", "AUCKLAND", "NEW ZEALAND", "NZ"],
+  ["NAN", "NADI", "FIJI", "FJ"],
+  ["GUM", "GUAM", "GUAM", "GU"],
+  ["HNL", "HONOLULU", "USA", "US"],
+  ["YYC", "CALGARY", "CANADA", "CA"],
+  ["IAH", "HOUSTON", "USA", "US"],
+  ["ORD", "CHICAGO/O'HARE", "USA", "US"],
+  ["PHX", "PHOENIX", "USA", "US"],
+  ["MCO", "ORLANDO", "USA", "US"],
+  ["EWR", "NEWARK", "USA", "US"],
+  ["PHL", "PHILADELPHIA", "USA", "US"],
+  ["MSP", "MINNEAPOLIS/ST. PAUL", "USA", "US"],
+  ["DTW", "DETROIT", "USA", "US"],
+  ["CLT", "CHARLOTTE", "USA", "US"],
+  ["SLC", "SALT LAKE CITY", "USA", "US"],
+];
+SINGLE_AIRPORT_CITIES.forEach(([code, name, country, cc]) => addCity(code, name, country, cc));
+
+// -- Airport codes belonging to a multi-airport metro code -------------------
+addAirport("LHR", "LONDON/HEATHROW", "LON");
+addAirport("LGW", "LONDON/GATWICK", "LON");
+addAirport("STN", "LONDON/STANSTED", "LON");
+addAirport("LTN", "LONDON/LUTON", "LON");
+addAirport("LCY", "LONDON/CITY", "LON");
+addAirport("JFK", "NEW YORK/JFK", "NYC");
+addAirport("EWR", "NEWARK LIBERTY (NEW YORK)", "NYC");
+addAirport("LGA", "NEW YORK/LAGUARDIA", "NYC");
+addAirport("CDG", "PARIS/CHARLES DE GAULLE", "PAR");
+addAirport("ORY", "PARIS/ORLY", "PAR");
+addAirport("BVA", "PARIS/BEAUVAIS", "PAR");
+addAirport("NRT", "TOKYO/NARITA", "TYO");
+addAirport("HND", "TOKYO/HANEDA", "TYO");
+addAirport("ORD", "CHICAGO/O'HARE", "CHI");
+addAirport("MDW", "CHICAGO/MIDWAY", "CHI");
+addAirport("IAD", "WASHINGTON/DULLES", "WAS");
+addAirport("DCA", "WASHINGTON/REAGAN NATIONAL", "WAS");
+addAirport("BWI", "BALTIMORE/WASHINGTON", "WAS");
+addAirport("MXP", "MILAN/MALPENSA", "MIL");
+addAirport("LIN", "MILAN/LINATE", "MIL");
+addAirport("BGY", "MILAN/BERGAMO", "MIL");
+addAirport("SVO", "MOSCOW/SHEREMETYEVO", "MOW");
+addAirport("DME", "MOSCOW/DOMODEDOVO", "MOW");
+addAirport("VKO", "MOSCOW/VNUKOVO", "MOW");
+addAirport("KIX", "OSAKA/KANSAI", "OSA");
+addAirport("ITM", "OSAKA/ITAMI", "OSA");
+addAirport("ICN", "SEOUL/INCHEON", "SEL");
+addAirport("GMP", "SEOUL/GIMPO", "SEL");
+addAirport("GRU", "SAO PAULO/GUARULHOS", "SAO");
+addAirport("CGH", "SAO PAULO/CONGONHAS", "SAO");
+addAirport("GIG", "RIO DE JANEIRO/GALEAO", "RIO");
+addAirport("SDU", "RIO DE JANEIRO/SANTOS DUMONT", "RIO");
+addAirport("EZE", "BUENOS AIRES/EZEIZA", "BUE");
+addAirport("AEP", "BUENOS AIRES/AEROPARQUE", "BUE");
+addAirport("FCO", "ROME/FIUMICINO", "ROM");
+addAirport("CIA", "ROME/CIAMPINO", "ROM");
+addAirport("ARN", "STOCKHOLM/ARLANDA", "STO");
+addAirport("BMA", "STOCKHOLM/BROMMA", "STO");
+addAirport("NYO", "STOCKHOLM/SKAVSTA", "STO");
+
+function locationOf(code: string): LocationEntry | undefined {
+  return LOCATIONS[code];
+}
+
+// Kept as the metro/city *display* name for a code, whatever kind it is --
+// used in AN/SN/TN headers. For an airport code this is still the city's
+// name (matches real Amadeus, which always shows the city name up top).
 function cityName(code: string): string {
-  return CITY_TABLE[code] ? CITY_TABLE[code].split(",")[0] : code;
+  const loc = LOCATIONS[code];
+  if (!loc) return code;
+  if (loc.type === "AIRPORT" && loc.cityCode) return LOCATIONS[loc.cityCode]?.name ?? loc.name;
+  return loc.name;
 }
 function countryCode(code: string): string {
-  return COUNTRY_CODE[code] ?? "XX";
+  return LOCATIONS[code]?.countryCode ?? "XX";
+}
+
+// If `code` is a multi-airport metro/city code, deterministically pick one
+// of its real constituent airports for a given flight -- this is what real
+// Amadeus availability does: querying a city code returns flights tagged
+// with the actual airport each one uses, not the bare city code repeated
+// on every line.
+function resolveAirport(code: string, seed: number): { airport: string; wasCity: boolean } {
+  const airports = CITY_AIRPORTS[code];
+  if (!airports || airports.length === 0) return { airport: code, wasCity: false };
+  return { airport: airports[seed % airports.length], wasCity: true };
 }
 
 // ---- date helpers (dd+MON, year inferred as the nearest same-or-future
@@ -605,7 +839,7 @@ function seatMapRows(seg: Segment): { row: number; seats: { seat: string; occupi
 
 function helpTopic(topic: string): string[] {
   const t: Record<string, string> = {
-    AN: "AN<ddMMM><ORIG><DEST>[<HHMM>|<HHA>][/A<CX>][/C<CLS>][/K<CABIN>][/X<PT>] -- air availability. Options: /A airline, /C class, /K cabin (F/C/W/M), /X connecting point, HHMM or HHA = flights from ~1hr before that time. e.g. AN15DECLONBKK, AN18AUGHKGSIN0900, AN18AUGHKGSIN09A/CQ",
+    AN: "AN<ddMMM><ORIG><DEST>[<HHMM>|<HHA>][/A<CX>][/C<CLS>][/K<CABIN>][/X<PT>] -- air availability. ORIG/DEST take either a metro/city code (LON, NYC, PAR, TYO, CHI, WAS, MIL, MOW, OSA, SEL, SAO, RIO, BUE, ROM, STO) or a specific airport code (LHR, JFK, CDG...); a city code returns flights tagged with the real airport each one uses. Options: /A airline, /C class, /K cabin (F/C/W/M), /X connecting point, HHMM or HHA = flights from ~1hr before that time. e.g. AN15DECLONBKK, AN15DECLHRBKK, AN18AUGHKGSIN0900, AN18AUGHKGSIN09A/CQ",
     SN: "SN<ddMMM><ORIG><DEST>[...] -- schedule display. Same entry & options as AN (shows all flights regardless of open availability).",
     TN: "TN<ddMMM><ORIG><DEST> -- timetable: every flight on that city pair for a 7-day period, with days of operation.",
     DO: "DO<n> (follow-up to an AN/SN line) OR DO<CX><FLT>/<ddMMM><ORIG><DEST> (direct entry) -- detailed flight information for one flight.",
@@ -631,8 +865,8 @@ function helpTopic(topic: string): string[] {
     JA: "JA..JF -- jump to work area A-F. Each area holds its own PNR in progress, so you can work several bookings side by side. JO shows what's in each area.",
     JO: "JO -- work area status: which of areas A-F are empty, in progress, or holding a saved PNR.",
     XE: "XE<n> -- cancel element number n. XE<a>-<b> -- cancel a range. XE<a>,<b> -- cancel selected elements. Numbering comes from RT.",
-    DAC: "DAC<code> -- decode a city/airport code to its name.",
-    DAN: "DAN <text> -- encode a city name to its code.",
+    DAC: "DAC<code> -- decode a city or airport code to its name. On a multi-airport metro code (LON, NYC, PAR, TYO, CHI, WAS, MIL, MOW, OSA, SEL, SAO, RIO, BUE, ROM, STO) also lists the airports under it, e.g. DACLON, DACLHR.",
+    DAN: "DAN <text> -- encode a city/country name to its code(s). Returns every match (exact, then starts-with, then contains), same as the real system when a name is ambiguous, e.g. DAN LONDON, DAN SAN.",
     FXP: "FXP -- fare quote for every real (non-ARNK) segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
     FP: "FP CASH | FP CHEQUE | FP CC<2-letter vendor code><card number>/<MMYY> -- form of payment, e.g. FP CASH or FPCCVI4444333322221111/0128. Required before TTP will issue.",
     TTP: "TTP -- Ticketing Transactional Print: issues an actual ticket for every passenger on a SAVED PNR (needs a locator from ER/ET), using the latest unused TST and the FP on file. Refuses if any segment is still waitlisted (HL).",
@@ -653,6 +887,8 @@ function renderAvailBlock(kind: "AN" | "SN", dateCode: string, origin: string, d
     `** AMADEUS ${kind === "SN" ? "SCHEDULE" : "AVAILABILITY"} - ${kind} ** ${dest} ${cityName(dest)}.${countryCode(dest)}   ` +
       `${daysBetweenToday(dateCode)} ${dowOf(dateCode)} ${dateCode} 0000`
   );
+  if (CITY_AIRPORTS[origin]) out.push(`** ${origin} IS A MULTI-AIRPORT CITY: ${CITY_AIRPORTS[origin].join("/")} -- EACH LINE SHOWS ITS ACTUAL AIRPORT **`);
+  if (CITY_AIRPORTS[dest]) out.push(`** ${dest} IS A MULTI-AIRPORT CITY: ${CITY_AIRPORTS[dest].join("/")} -- EACH LINE SHOWS ITS ACTUAL AIRPORT **`);
   notes.forEach((n) => out.push(`** ${n} **`));
   if (rows.length === 0) {
     out.push(" NO FLIGHTS MATCH THIS AVAILABILITY REQUEST");
@@ -1638,20 +1874,61 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // DAC city decode
+  // DAC -- decode a city OR airport code. Real Amadeus: an airport code
+  // decodes to "CITY NAME/AIRPORT NAME, COUNTRY"; a metro/city code that
+  // covers several airports also lists them, since that's the whole point
+  // of DAC'ing a city code before you AN it.
   const dacMatch = cmd.match(/^DAC([A-Z]{3})$/);
   if (dacMatch) {
-    const city = dacMatch[1];
-    out.push(CITY_TABLE[city] ? `${city} ${CITY_TABLE[city]}` : `${city} UNKNOWN CITY CODE (DEMO TABLE LIMITED)`);
+    const code = dacMatch[1];
+    const loc = locationOf(code);
+    if (!loc) {
+      out.push(`${code} UNKNOWN CODE (NOT IN THIS TRAINER'S GEOGRAPHY TABLE)`);
+    } else if (loc.type === "AIRPORT") {
+      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}  (AIRPORT - CITY CODE ${loc.cityCode})`);
+    } else if (CITY_AIRPORTS[code]) {
+      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}  (METROPOLITAN AREA)`);
+      out.push(` AIRPORTS SERVING ${code}: ${CITY_AIRPORTS[code].join(", ")}`);
+    } else {
+      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}`);
+    }
     return { lines: out, state: s };
   }
 
-  // DAN city encode (name -> code), reverse lookup on the same table
+  // DAN -- encode a name to its code(s). Real Amadeus returns every
+  // plausible match, ranked (exact match first, then "starts with", then
+  // "contains"), not just the first hit -- a name like SAN or SANTIAGO is
+  // genuinely ambiguous and the terminal shows you the candidate list.
   const danMatch = raw.match(/^DAN\s+(.+)$/i);
   if (danMatch) {
     const needle = danMatch[1].trim().toUpperCase();
-    const found = Object.entries(CITY_TABLE).find(([, name]) => name.includes(needle));
-    out.push(found ? `${needle} ${found[0]}` : `${needle} NO MATCH (DEMO TABLE LIMITED)`);
+    const all = Object.values(LOCATIONS);
+    const rank = (loc: LocationEntry): number => {
+      if (loc.name === needle) return 0;
+      if (loc.name.startsWith(needle)) return 1;
+      if (loc.name.includes(needle)) return 2;
+      if (loc.country.startsWith(needle)) return 3;
+      if (loc.country.includes(needle)) return 4;
+      return -1;
+    };
+    const matches = all
+      .map((loc) => ({ loc, r: rank(loc) }))
+      .filter((x) => x.r >= 0)
+      .sort((a, b) => a.r - b.r || a.loc.code.localeCompare(b.loc.code))
+      .slice(0, 15);
+    if (matches.length === 0) {
+      out.push(`${needle} NO MATCH (NOT IN THIS TRAINER'S GEOGRAPHY TABLE)`);
+    } else if (matches.length === 1) {
+      const { loc } = matches[0];
+      const tag = loc.type === "AIRPORT" ? ` (AIRPORT, CITY ${loc.cityCode})` : "";
+      out.push(`${needle} ${loc.code} ${loc.name}, ${loc.country}${tag}`);
+    } else {
+      out.push(`${needle} -- MULTIPLE MATCHES:`);
+      matches.forEach(({ loc }) => {
+        const tag = loc.type === "AIRPORT" ? ` (AIRPORT, CITY ${loc.cityCode})` : "";
+        out.push(` ${loc.code}  ${loc.name}, ${loc.country}${tag}`);
+      });
+    }
     return { lines: out, state: s };
   }
 
