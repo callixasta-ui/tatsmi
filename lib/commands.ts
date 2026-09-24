@@ -434,6 +434,70 @@ const CARRIER_NUMERIC: Record<string, string> = {
   BA: "125", LH: "220", AF: "057", TG: "217", SQ: "618", EK: "176", QF: "081", CX: "160",
 };
 
+// Airline code<->name table for DNA (Decode/eNcode Airline). Real Amadeus
+// covers the full IATA airline list; this is a curated set of major
+// carriers -- the CARRIERS this trainer actually generates flights for,
+// plus enough other well-known names that lookups feel real rather than
+// only covering the demo's own 8 carriers.
+const AIRLINES: Record<string, string> = {
+  BA: "BRITISH AIRWAYS",
+  LH: "LUFTHANSA",
+  AF: "AIR FRANCE",
+  TG: "THAI AIRWAYS INTERNATIONAL",
+  SQ: "SINGAPORE AIRLINES",
+  EK: "EMIRATES",
+  QF: "QANTAS AIRWAYS",
+  CX: "CATHAY PACIFIC AIRWAYS",
+  AA: "AMERICAN AIRLINES",
+  UA: "UNITED AIRLINES",
+  DL: "DELTA AIR LINES",
+  AC: "AIR CANADA",
+  KL: "KLM ROYAL DUTCH AIRLINES",
+  IB: "IBERIA",
+  AZ: "ITA AIRWAYS",
+  LX: "SWISS INTERNATIONAL AIR LINES",
+  OS: "AUSTRIAN AIRLINES",
+  TK: "TURKISH AIRLINES",
+  QR: "QATAR AIRWAYS",
+  EY: "ETIHAD AIRWAYS",
+  SV: "SAUDIA",
+  RJ: "ROYAL JORDANIAN",
+  ET: "ETHIOPIAN AIRLINES",
+  MS: "EGYPTAIR",
+  KQ: "KENYA AIRWAYS",
+  SA: "SOUTH AFRICAN AIRWAYS",
+  NZ: "AIR NEW ZEALAND",
+  JQ: "JETSTAR AIRWAYS",
+  VA: "VIRGIN AUSTRALIA",
+  NH: "ALL NIPPON AIRWAYS",
+  JL: "JAPAN AIRLINES",
+  KE: "KOREAN AIR",
+  OZ: "ASIANA AIRLINES",
+  CI: "CHINA AIRLINES",
+  BR: "EVA AIR",
+  MU: "CHINA EASTERN AIRLINES",
+  CA: "AIR CHINA",
+  CZ: "CHINA SOUTHERN AIRLINES",
+  PR: "PHILIPPINE AIRLINES",
+  "5J": "CEBU PACIFIC AIR",
+  MH: "MALAYSIA AIRLINES",
+  AK: "AIRASIA",
+  GA: "GARUDA INDONESIA",
+  VN: "VIETNAM AIRLINES",
+  AI: "AIR INDIA",
+  "6E": "INDIGO",
+  UL: "SRILANKAN AIRLINES",
+  PK: "PAKISTAN INTERNATIONAL AIRLINES",
+  LA: "LATAM AIRLINES",
+  AV: "AVIANCA",
+  AM: "AEROMEXICO",
+  WS: "WESTJET",
+  FZ: "FLYDUBAI",
+  WY: "OMAN AIR",
+  GF: "GULF AIR",
+  LY: "EL AL ISRAEL AIRLINES",
+};
+
 // Ticket numbers are 3-digit airline code + 10-digit document number, where
 // the document number's last digit is a check digit = (first 9 digits) mod 7
 // -- the real IATA ticket-numbering rule, not an arbitrary format.
@@ -867,6 +931,7 @@ function helpTopic(topic: string): string[] {
     XE: "XE<n> -- cancel element number n. XE<a>-<b> -- cancel a range. XE<a>,<b> -- cancel selected elements. Numbering comes from RT.",
     DAC: "DAC<code> -- decode a city or airport code to its name. On a multi-airport metro code (LON, NYC, PAR, TYO, CHI, WAS, MIL, MOW, OSA, SEL, SAO, RIO, BUE, ROM, STO) also lists the airports under it, e.g. DACLON, DACLHR.",
     DAN: "DAN <text> -- encode a city/country name to its code(s). Returns every match (exact, then starts-with, then contains), same as the real system when a name is ambiguous, e.g. DAN LONDON, DAN SAN.",
+    DNA: "DNA<code> -- decode a 2-letter (occasionally alphanumeric) airline code to its name, e.g. DNAEK. DNA <text> -- the reverse: encode an airline name to its code(s), e.g. DNA EMIRATES. Bidirectional, same pairing style as DAC/DAN but for carriers.",
     FXP: "FXP -- fare quote for every real (non-ARNK) segment in the active PNR. Stores the result as a TST (T01, T02...) ready for ticketing.",
     FP: "FP CASH | FP CHEQUE | FP CC<2-letter vendor code><card number>/<MMYY> -- form of payment, e.g. FP CASH or FPCCVI4444333322221111/0128. Required before TTP will issue.",
     TTP: "TTP -- Ticketing Transactional Print: issues an actual ticket for every passenger on a SAVED PNR (needs a locator from ER/ET), using the latest unused TST and the FP on file. Refuses if any segment is still waitlisted (HL).",
@@ -973,6 +1038,7 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "IR                            SHOW THE AIRLINE RECORD LOCATOR FOR EACH AIR SEGMENT",
       "JA..JF / JO                   JUMP TO WORK AREA A-F / SHOW AREA STATUS",
       "DAC<CODE> / DAN <TEXT>        DECODE / ENCODE A CITY",
+      "DNA<CODE> / DNA <TEXT>        DECODE / ENCODE AN AIRLINE (BIDIRECTIONAL)",
       "CLS                           CLEAR SCREEN (trainer convenience only)",
       "HE <TOPIC>                    HELP ON ONE ENTRY, e.g. HE TKTL",
       "--------------------------------------------------"
@@ -1928,6 +1994,49 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
         const tag = loc.type === "AIRPORT" ? ` (AIRPORT, CITY ${loc.cityCode})` : "";
         out.push(` ${loc.code}  ${loc.name}, ${loc.country}${tag}`);
       });
+    }
+    return { lines: out, state: s };
+  }
+
+  // DNA -- decode/encode airline (bidirectional), same pairing as DAC/DAN
+  // but for carriers instead of cities: DNA<CODE> (no space) decodes a
+  // 2-letter (occasionally alphanumeric, e.g. "5J") airline code to its
+  // name; DNA <TEXT> (with a space) encodes a name back to its code(s).
+  const dnaCodeMatch = cmd.match(/^DNA([A-Z0-9]{2,3})$/);
+  if (dnaCodeMatch) {
+    const code = dnaCodeMatch[1];
+    const name = AIRLINES[code];
+    if (!name) {
+      out.push(`${code} UNKNOWN AIRLINE CODE (NOT IN THIS TRAINER'S AIRLINE TABLE)`);
+    } else {
+      out.push(`${code} ${name}`);
+    }
+    return { lines: out, state: s };
+  }
+
+  const dnaNameMatch = raw.match(/^DNA\s+(.+)$/i);
+  if (dnaNameMatch) {
+    const needle = dnaNameMatch[1].trim().toUpperCase();
+    const entries = Object.entries(AIRLINES);
+    const rank = (name: string): number => {
+      if (name === needle) return 0;
+      if (name.startsWith(needle)) return 1;
+      if (name.includes(needle)) return 2;
+      return -1;
+    };
+    const matches = entries
+      .map(([code, name]) => ({ code, name, r: rank(name) }))
+      .filter((x) => x.r >= 0)
+      .sort((a, b) => a.r - b.r || a.code.localeCompare(b.code))
+      .slice(0, 15);
+    if (matches.length === 0) {
+      out.push(`${needle} NO MATCH (NOT IN THIS TRAINER'S AIRLINE TABLE)`);
+    } else if (matches.length === 1) {
+      const { code, name } = matches[0];
+      out.push(`${needle} ${code} ${name}`);
+    } else {
+      out.push(`${needle} -- MULTIPLE MATCHES:`);
+      matches.forEach(({ code, name }) => out.push(` ${code}  ${name}`));
     }
     return { lines: out, state: s };
   }
