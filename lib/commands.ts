@@ -445,7 +445,28 @@ function parseQualifiers(tokens: string[]): AvailQualifiers {
         q.notes.push(`/A${val} -- "${val.toUpperCase()}" NOT IN THIS TRAINER'S AIRLINE TABLE (NO FLIGHTS WILL MATCH)`);
       }
     }
-    else if (opt === "C" && val) q.classFilter = val[0];
+    else if (opt === "C" && val) {
+      const cls = val[0].toUpperCase();
+      q.classFilter = cls;
+      if (!ALL_CLASSES.some((c) => c.code === cls)) {
+        // /C takes a single booking-class LETTER (e.g. /CY), not an airline
+        // code -- easy to mix up with /A. If what follows /C actually looks
+        // like a real carrier (e.g. someone typed /CX meaning Cathay
+        // Pacific), say so directly instead of leaving them to guess why
+        // an otherwise-correct-looking entry came back empty.
+        // The carrier code is "C" + val (e.g. token "CX" = the letter C
+        // that introduces this qualifier, plus "X") -- so it's the whole
+        // token, not val alone, that might actually be a 2-letter airline.
+        const maybeCarrier = resolveCarrierCode(tok);
+        if (maybeCarrier) {
+          q.notes.push(
+            `/${tok} -- "${cls}" IS NOT A VALID BOOKING CLASS. DID YOU MEAN /A${tok} (${AIRLINES_BY_IATA[maybeCarrier]?.name}) TO FILTER BY AIRLINE? (NO FLIGHTS WILL MATCH AS ENTERED)`
+          );
+        } else {
+          q.notes.push(`/C${val} -- "${cls}" IS NOT A VALID BOOKING CLASS (NO FLIGHTS WILL MATCH)`);
+        }
+      }
+    }
     else if (opt === "K" && val && CABIN_LETTERS.includes(val[0])) q.cabinFilter = val[0] as "F" | "C" | "W" | "M";
     else if (opt === "X" && val) {
       q.connectingPoint = val;
@@ -458,12 +479,33 @@ function parseQualifiers(tokens: string[]): AvailQualifiers {
 function buildAvailability(dateCode: string, origin: string, dest: string, q: AvailQualifiers = { notes: [] }): FlightRow[] {
   const rows: FlightRow[] = [];
   let line = 1;
-  for (let i = 1; i <= 8; i++) {
-    const r = seededRand(dateCode + origin + dest, i);
-    const carrier = CARRIERS[r % CARRIERS.length];
-    const flightNo = String(100 + (r % 800));
-    if (q.carrierFilter && carrier !== q.carrierFilter) continue;
 
+  // With ~55 airlines on file and only 8 "slots" per unfiltered display,
+  // a real carrier drawn purely at random for those 8 slots misses most
+  // of the time -- so a perfectly plausible /A<CX> filter (an airline
+  // this trainer genuinely knows about) would come back empty far more
+  // often than real Amadeus ever would. Instead, once we know the filter
+  // names a real carrier, generate that carrier's own candidate flights
+  // directly (still deterministic per date+route+carrier, so re-running
+  // the same entry gives the same result) rather than leaving it to the
+  // luck of the unfiltered draw. An unrecognized carrier still legitimately
+  // returns no matches (see parseQualifiers' NOT IN THIS TRAINER'S note).
+  const slots: { carrier: string; flightNo: string; seed: number }[] = [];
+  if (q.carrierFilter && CARRIERS.includes(q.carrierFilter)) {
+    for (let i = 1; i <= 3; i++) {
+      const r = seededRand(dateCode + origin + dest + q.carrierFilter, i);
+      slots.push({ carrier: q.carrierFilter, flightNo: String(100 + (r % 800)), seed: r });
+    }
+  } else if (!q.carrierFilter) {
+    for (let i = 1; i <= 8; i++) {
+      const r = seededRand(dateCode + origin + dest, i);
+      slots.push({ carrier: CARRIERS[r % CARRIERS.length], flightNo: String(100 + (r % 800)), seed: r });
+    }
+  }
+  // q.carrierFilter set but NOT a recognized carrier -> slots stays empty,
+  // rows stays empty, "NO FLIGHTS MATCH" is shown (correct: unknown airline).
+
+  for (const { carrier, flightNo, seed: r } of slots) {
     const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
     if (q.afterHour !== undefined) {
       const depHour = parseInt(base.depTime.slice(0, 2), 10);
