@@ -333,6 +333,7 @@ const AIRLINE_RECORDS: AirlineRecord[] = [
   { iata: "SA", icao: "SAA", numeric: "083", name: "SOUTH AFRICAN AIRWAYS", hubs: ["JNB"], reach: "global" },
   { iata: "NZ", icao: "ANZ", numeric: "086", name: "AIR NEW ZEALAND", hubs: ["AKL"], reach: "global" },
   { iata: "JQ", icao: "JST", name: "JETSTAR AIRWAYS", hubs: ["SYD", "MEL"], reach: "regional", homeRegions: ["OCEANIA", "SOUTHEAST_ASIA"] },
+  { iata: "GK", icao: "JJP", name: "JETSTAR JAPAN", hubs: ["TYO"], reach: "regional", homeRegions: ["EAST_ASIA", "SOUTHEAST_ASIA"] },
   { iata: "VA", icao: "VOZ", name: "VIRGIN AUSTRALIA", hubs: ["SYD", "BNE", "MEL"], reach: "regional", homeRegions: ["OCEANIA", "SOUTHEAST_ASIA", "NORTH_AMERICA"] },
   { iata: "NH", icao: "ANA", numeric: "205", name: "ALL NIPPON AIRWAYS", hubs: ["TYO"], reach: "global" },
   { iata: "JL", icao: "JAL", numeric: "131", name: "JAPAN AIRLINES", hubs: ["TYO"], reach: "global" },
