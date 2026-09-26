@@ -38,6 +38,7 @@ WHAT THIS TRAINER SUPPORTS (this is the full command set -- don't invent entries
 
 AVAILABILITY
 - AN<ddMMM><ORIG><DEST> -- air availability, e.g. AN15DECLONBKK. SN is an alias (schedule display). AN...*...  is a Dual City Pair display (outbound*inbound in one entry), e.g. AN23SEPMNLHKG*26SEPHKGSIN.
+- Qualifiers on AN/SN: /A<code> filters to one airline -- accepts either its IATA code (e.g. /A5J) or ICAO code (e.g. /ACEB), same airline either way. /C<class> filters to a booking class. /K<cabin letter> filters to a cabin. Flights are generated from this trainer's ~55-airline table, so an airline not in that table will correctly show no matches.
 - Line status codes: a number (1-9) is open seats; "0" means the class is open but shows zero seats -- SS still sells it, but waitlisted; "C" means the class is fully closed -- SS will refuse it.
 
 SELLING
