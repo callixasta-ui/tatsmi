@@ -228,7 +228,113 @@ function emptyPNR(): PNR {
   return { names: [], segments: [], contacts: [], remarks: [], osi: [], seatAssignments: [], tst: [], tickets: [] };
 }
 
-const CARRIERS = ["BA", "LH", "AF", "TG", "SQ", "EK", "QF", "CX"];
+// Airline record for DNA (Decode/eNcode Airline) and for flight
+// generation. Real Amadeus keys DNA off EITHER the 2-character IATA code
+// (the one used in flight numbers and PNRs, e.g. "5J") OR the 3-letter
+// ICAO code (used in ops/ATC contexts and often printed alongside the
+// IATA code in the real DNA response, e.g. "CEB") -- both point at the
+// same airline. numeric is the 3-digit IATA ticket-stock prefix, included
+// in the real response where known; left undefined for carriers this
+// trainer isn't confident on.
+interface AirlineRecord {
+  iata: string;
+  icao: string;
+  numeric?: string;
+  name: string;
+}
+
+// This is the single source of truth for every airline this trainer
+// knows about: DNA decodes/encodes against it, AN/SN/TN generate flights
+// using it (via CARRIERS below), and the /A<code> filter on those
+// displays and ticket-number generation both resolve through it too --
+// so an airline that's "real" in one command is real everywhere. Real
+// Amadeus covers the full IATA/ICAO airline list; this is a curated
+// subset of major carriers.
+const AIRLINE_RECORDS: AirlineRecord[] = [
+  { iata: "BA", icao: "BAW", numeric: "125", name: "BRITISH AIRWAYS" },
+  { iata: "LH", icao: "DLH", numeric: "220", name: "LUFTHANSA" },
+  { iata: "AF", icao: "AFR", numeric: "057", name: "AIR FRANCE" },
+  { iata: "TG", icao: "THA", numeric: "217", name: "THAI AIRWAYS INTERNATIONAL" },
+  { iata: "SQ", icao: "SIA", numeric: "618", name: "SINGAPORE AIRLINES" },
+  { iata: "EK", icao: "UAE", numeric: "176", name: "EMIRATES" },
+  { iata: "QF", icao: "QFA", numeric: "081", name: "QANTAS AIRWAYS" },
+  { iata: "CX", icao: "CPA", numeric: "160", name: "CATHAY PACIFIC AIRWAYS" },
+  { iata: "AA", icao: "AAL", numeric: "001", name: "AMERICAN AIRLINES" },
+  { iata: "UA", icao: "UAL", numeric: "016", name: "UNITED AIRLINES" },
+  { iata: "DL", icao: "DAL", numeric: "006", name: "DELTA AIR LINES" },
+  { iata: "AC", icao: "ACA", numeric: "014", name: "AIR CANADA" },
+  { iata: "KL", icao: "KLM", numeric: "074", name: "KLM ROYAL DUTCH AIRLINES" },
+  { iata: "IB", icao: "IBE", numeric: "075", name: "IBERIA" },
+  { iata: "AZ", icao: "ITY", numeric: "055", name: "ITA AIRWAYS" },
+  { iata: "LX", icao: "SWR", numeric: "724", name: "SWISS INTERNATIONAL AIR LINES" },
+  { iata: "OS", icao: "AUA", numeric: "257", name: "AUSTRIAN AIRLINES" },
+  { iata: "TK", icao: "THY", numeric: "235", name: "TURKISH AIRLINES" },
+  { iata: "QR", icao: "QTR", numeric: "157", name: "QATAR AIRWAYS" },
+  { iata: "EY", icao: "ETD", numeric: "607", name: "ETIHAD AIRWAYS" },
+  { iata: "SV", icao: "SVA", numeric: "065", name: "SAUDIA" },
+  { iata: "RJ", icao: "RJA", numeric: "512", name: "ROYAL JORDANIAN" },
+  { iata: "ET", icao: "ETH", numeric: "071", name: "ETHIOPIAN AIRLINES" },
+  { iata: "MS", icao: "MSR", numeric: "077", name: "EGYPTAIR" },
+  { iata: "KQ", icao: "KQA", numeric: "706", name: "KENYA AIRWAYS" },
+  { iata: "SA", icao: "SAA", numeric: "083", name: "SOUTH AFRICAN AIRWAYS" },
+  { iata: "NZ", icao: "ANZ", numeric: "086", name: "AIR NEW ZEALAND" },
+  { iata: "JQ", icao: "JST", name: "JETSTAR AIRWAYS" },
+  { iata: "VA", icao: "VOZ", name: "VIRGIN AUSTRALIA" },
+  { iata: "NH", icao: "ANA", numeric: "205", name: "ALL NIPPON AIRWAYS" },
+  { iata: "JL", icao: "JAL", numeric: "131", name: "JAPAN AIRLINES" },
+  { iata: "KE", icao: "KAL", numeric: "180", name: "KOREAN AIR" },
+  { iata: "OZ", icao: "AAR", numeric: "988", name: "ASIANA AIRLINES" },
+  { iata: "CI", icao: "CAL", numeric: "297", name: "CHINA AIRLINES" },
+  { iata: "BR", icao: "EVA", numeric: "695", name: "EVA AIR" },
+  { iata: "MU", icao: "CES", numeric: "781", name: "CHINA EASTERN AIRLINES" },
+  { iata: "CA", icao: "CCA", numeric: "999", name: "AIR CHINA" },
+  { iata: "CZ", icao: "CSN", numeric: "784", name: "CHINA SOUTHERN AIRLINES" },
+  { iata: "PR", icao: "PAL", numeric: "079", name: "PHILIPPINE AIRLINES" },
+  { iata: "5J", icao: "CEB", numeric: "203", name: "CEBU PACIFIC AIR" },
+  { iata: "MH", icao: "MAS", numeric: "232", name: "MALAYSIA AIRLINES" },
+  { iata: "AK", icao: "AXM", name: "AIRASIA" },
+  { iata: "GA", icao: "GIA", numeric: "126", name: "GARUDA INDONESIA" },
+  { iata: "VN", icao: "HVN", numeric: "738", name: "VIETNAM AIRLINES" },
+  { iata: "AI", icao: "AIC", numeric: "098", name: "AIR INDIA" },
+  { iata: "6E", icao: "IGO", numeric: "312", name: "INDIGO" },
+  { iata: "UL", icao: "ALK", numeric: "603", name: "SRILANKAN AIRLINES" },
+  { iata: "PK", icao: "PIA", numeric: "214", name: "PAKISTAN INTERNATIONAL AIRLINES" },
+  { iata: "LA", icao: "LAN", numeric: "045", name: "LATAM AIRLINES" },
+  { iata: "AV", icao: "AVA", numeric: "134", name: "AVIANCA" },
+  { iata: "AM", icao: "AMX", numeric: "139", name: "AEROMEXICO" },
+  { iata: "WS", icao: "WJA", numeric: "838", name: "WESTJET" },
+  { iata: "FZ", icao: "FDB", name: "FLYDUBAI" },
+  { iata: "WY", icao: "OMA", numeric: "910", name: "OMAN AIR" },
+  { iata: "GF", icao: "GFA", numeric: "072", name: "GULF AIR" },
+  { iata: "LY", icao: "ELY", numeric: "114", name: "EL AL ISRAEL AIRLINES" },
+];
+
+const AIRLINES_BY_IATA: Record<string, AirlineRecord> = {};
+const AIRLINES_BY_ICAO: Record<string, AirlineRecord> = {};
+for (const rec of AIRLINE_RECORDS) {
+  AIRLINES_BY_IATA[rec.iata] = rec;
+  AIRLINES_BY_ICAO[rec.icao] = rec;
+}
+
+// "IATA/ICAO" or, for the rare record missing one side, whichever it has.
+function airlineCodePair(rec: AirlineRecord): string {
+  return `${rec.iata}/${rec.icao}`;
+}
+
+// Resolve whatever the user typed for a carrier -- IATA (e.g. "5J") or
+// ICAO (e.g. "CEB"), any case -- to the canonical IATA code used
+// internally for flight generation and filtering. Returns undefined if
+// it isn't a carrier this trainer knows about at all.
+function resolveCarrierCode(input: string): string | undefined {
+  const code = input.trim().toUpperCase();
+  return AIRLINES_BY_IATA[code]?.iata ?? AIRLINES_BY_ICAO[code]?.iata;
+}
+
+// Every airline this trainer knows about is a candidate for AN/SN/TN
+// flight generation and for the /A<code> filter on those -- not just the
+// original demo's 8. Keeps DNA and "what flights can I actually see"
+// consistent with each other.
+const CARRIERS = AIRLINE_RECORDS.map((r) => r.iata);
 const AIRCRAFT = ["320", "321", "332", "333", "343", "359", "388", "744", "772", "773", "787"];
 const ACCESS_INDICATORS = ["/", ".", "*", ""]; // full / sell / direct / standard
 
@@ -327,7 +433,18 @@ function parseQualifiers(tokens: string[]): AvailQualifiers {
   tokens.forEach((tok) => {
     const opt = tok[0];
     const val = tok.slice(1);
-    if (opt === "A" && val) q.carrierFilter = val;
+    if (opt === "A" && val) {
+      const resolved = resolveCarrierCode(val);
+      if (resolved) {
+        q.carrierFilter = resolved;
+      } else {
+        // Keep the qualifier so results still come back empty rather than
+        // silently ignoring it, but flag it -- same as real Amadeus giving
+        // no matches for an unrecognized carrier.
+        q.carrierFilter = val.toUpperCase();
+        q.notes.push(`/A${val} -- "${val.toUpperCase()}" NOT IN THIS TRAINER'S AIRLINE TABLE (NO FLIGHTS WILL MATCH)`);
+      }
+    }
     else if (opt === "C" && val) q.classFilter = val[0];
     else if (opt === "K" && val && CABIN_LETTERS.includes(val[0])) q.cabinFilter = val[0] as "F" | "C" | "W" | "M";
     else if (opt === "X" && val) {
@@ -345,7 +462,7 @@ function buildAvailability(dateCode: string, origin: string, dest: string, q: Av
     const r = seededRand(dateCode + origin + dest, i);
     const carrier = CARRIERS[r % CARRIERS.length];
     const flightNo = String(100 + (r % 800));
-    if (q.carrierFilter && carrier !== q.carrierFilter.toUpperCase()) continue;
+    if (q.carrierFilter && carrier !== q.carrierFilter) continue;
 
     const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
     if (q.afterHour !== undefined) {
@@ -428,106 +545,13 @@ function genLocator(): string {
   return out;
 }
 
-// Real IATA airline numeric codes, used as the 3-digit prefix on a ticket
-// document number (e.g. "125" for British Airways).
-const CARRIER_NUMERIC: Record<string, string> = {
-  BA: "125", LH: "220", AF: "057", TG: "217", SQ: "618", EK: "176", QF: "081", CX: "160",
-};
-
-// Airline record for DNA (Decode/eNcode Airline). Real Amadeus keys this
-// entry off EITHER the 2-character IATA code (the one used in flight
-// numbers and PNRs, e.g. "5J") OR the 3-letter ICAO code (used in ATC/ops
-// contexts and often printed alongside the IATA code in the real DNA
-// response, e.g. "CEB") -- both point at the same airline. numeric is the
-// 3-digit IATA ticket-stock prefix, included in the real response where
-// known; left undefined for carriers this trainer isn't confident on.
-interface AirlineRecord {
-  iata: string;
-  icao: string;
-  numeric?: string;
-  name: string;
-}
-
-// Curated set of major carriers -- the 8 CARRIERS this trainer actually
-// generates flights for, plus enough other well-known airlines that
-// lookups feel real rather than only covering the demo's own fleet. Real
-// Amadeus covers the full IATA/ICAO airline list; this is a subset.
-const AIRLINE_RECORDS: AirlineRecord[] = [
-  { iata: "BA", icao: "BAW", numeric: "125", name: "BRITISH AIRWAYS" },
-  { iata: "LH", icao: "DLH", numeric: "220", name: "LUFTHANSA" },
-  { iata: "AF", icao: "AFR", numeric: "057", name: "AIR FRANCE" },
-  { iata: "TG", icao: "THA", numeric: "217", name: "THAI AIRWAYS INTERNATIONAL" },
-  { iata: "SQ", icao: "SIA", numeric: "618", name: "SINGAPORE AIRLINES" },
-  { iata: "EK", icao: "UAE", numeric: "176", name: "EMIRATES" },
-  { iata: "QF", icao: "QFA", numeric: "081", name: "QANTAS AIRWAYS" },
-  { iata: "CX", icao: "CPA", numeric: "160", name: "CATHAY PACIFIC AIRWAYS" },
-  { iata: "AA", icao: "AAL", numeric: "001", name: "AMERICAN AIRLINES" },
-  { iata: "UA", icao: "UAL", numeric: "016", name: "UNITED AIRLINES" },
-  { iata: "DL", icao: "DAL", numeric: "006", name: "DELTA AIR LINES" },
-  { iata: "AC", icao: "ACA", numeric: "014", name: "AIR CANADA" },
-  { iata: "KL", icao: "KLM", numeric: "074", name: "KLM ROYAL DUTCH AIRLINES" },
-  { iata: "IB", icao: "IBE", numeric: "075", name: "IBERIA" },
-  { iata: "AZ", icao: "ITY", numeric: "055", name: "ITA AIRWAYS" },
-  { iata: "LX", icao: "SWR", numeric: "724", name: "SWISS INTERNATIONAL AIR LINES" },
-  { iata: "OS", icao: "AUA", numeric: "257", name: "AUSTRIAN AIRLINES" },
-  { iata: "TK", icao: "THY", numeric: "235", name: "TURKISH AIRLINES" },
-  { iata: "QR", icao: "QTR", numeric: "157", name: "QATAR AIRWAYS" },
-  { iata: "EY", icao: "ETD", numeric: "607", name: "ETIHAD AIRWAYS" },
-  { iata: "SV", icao: "SVA", numeric: "065", name: "SAUDIA" },
-  { iata: "RJ", icao: "RJA", numeric: "512", name: "ROYAL JORDANIAN" },
-  { iata: "ET", icao: "ETH", numeric: "071", name: "ETHIOPIAN AIRLINES" },
-  { iata: "MS", icao: "MSR", numeric: "077", name: "EGYPTAIR" },
-  { iata: "KQ", icao: "KQA", numeric: "706", name: "KENYA AIRWAYS" },
-  { iata: "SA", icao: "SAA", numeric: "083", name: "SOUTH AFRICAN AIRWAYS" },
-  { iata: "NZ", icao: "ANZ", numeric: "086", name: "AIR NEW ZEALAND" },
-  { iata: "JQ", icao: "JST", name: "JETSTAR AIRWAYS" },
-  { iata: "VA", icao: "VOZ", name: "VIRGIN AUSTRALIA" },
-  { iata: "NH", icao: "ANA", numeric: "205", name: "ALL NIPPON AIRWAYS" },
-  { iata: "JL", icao: "JAL", numeric: "131", name: "JAPAN AIRLINES" },
-  { iata: "KE", icao: "KAL", numeric: "180", name: "KOREAN AIR" },
-  { iata: "OZ", icao: "AAR", numeric: "988", name: "ASIANA AIRLINES" },
-  { iata: "CI", icao: "CAL", numeric: "297", name: "CHINA AIRLINES" },
-  { iata: "BR", icao: "EVA", numeric: "695", name: "EVA AIR" },
-  { iata: "MU", icao: "CES", numeric: "781", name: "CHINA EASTERN AIRLINES" },
-  { iata: "CA", icao: "CCA", numeric: "999", name: "AIR CHINA" },
-  { iata: "CZ", icao: "CSN", numeric: "784", name: "CHINA SOUTHERN AIRLINES" },
-  { iata: "PR", icao: "PAL", numeric: "079", name: "PHILIPPINE AIRLINES" },
-  { iata: "5J", icao: "CEB", numeric: "203", name: "CEBU PACIFIC AIR" },
-  { iata: "MH", icao: "MAS", numeric: "232", name: "MALAYSIA AIRLINES" },
-  { iata: "AK", icao: "AXM", name: "AIRASIA" },
-  { iata: "GA", icao: "GIA", numeric: "126", name: "GARUDA INDONESIA" },
-  { iata: "VN", icao: "HVN", numeric: "738", name: "VIETNAM AIRLINES" },
-  { iata: "AI", icao: "AIC", numeric: "098", name: "AIR INDIA" },
-  { iata: "6E", icao: "IGO", numeric: "312", name: "INDIGO" },
-  { iata: "UL", icao: "ALK", numeric: "603", name: "SRILANKAN AIRLINES" },
-  { iata: "PK", icao: "PIA", numeric: "214", name: "PAKISTAN INTERNATIONAL AIRLINES" },
-  { iata: "LA", icao: "LAN", numeric: "045", name: "LATAM AIRLINES" },
-  { iata: "AV", icao: "AVA", numeric: "134", name: "AVIANCA" },
-  { iata: "AM", icao: "AMX", numeric: "139", name: "AEROMEXICO" },
-  { iata: "WS", icao: "WJA", numeric: "838", name: "WESTJET" },
-  { iata: "FZ", icao: "FDB", name: "FLYDUBAI" },
-  { iata: "WY", icao: "OMA", numeric: "910", name: "OMAN AIR" },
-  { iata: "GF", icao: "GFA", numeric: "072", name: "GULF AIR" },
-  { iata: "LY", icao: "ELY", numeric: "114", name: "EL AL ISRAEL AIRLINES" },
-];
-
-const AIRLINES_BY_IATA: Record<string, AirlineRecord> = {};
-const AIRLINES_BY_ICAO: Record<string, AirlineRecord> = {};
-for (const rec of AIRLINE_RECORDS) {
-  AIRLINES_BY_IATA[rec.iata] = rec;
-  AIRLINES_BY_ICAO[rec.icao] = rec;
-}
-
-// "IATA/ICAO" or, for the rare record missing one side, whichever it has.
-function airlineCodePair(rec: AirlineRecord): string {
-  return `${rec.iata}/${rec.icao}`;
-}
-
 // Ticket numbers are 3-digit airline code + 10-digit document number, where
 // the document number's last digit is a check digit = (first 9 digits) mod 7
-// -- the real IATA ticket-numbering rule, not an arbitrary format.
+// -- the real IATA ticket-numbering rule, not an arbitrary format. Falls
+// back to "999" for carriers this trainer doesn't have a confirmed
+// IATA numeric prefix for (see AIRLINE_RECORDS above).
 function genTicketNumber(carrier: string): string {
-  const airlineCode = CARRIER_NUMERIC[carrier] ?? "999";
+  const airlineCode = AIRLINES_BY_IATA[carrier]?.numeric ?? "999";
   let serial = "";
   for (let i = 0; i < 9; i++) serial += Math.floor(Math.random() * 10);
   const checkDigit = parseInt(serial, 10) % 7;
