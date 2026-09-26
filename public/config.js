@@ -82,7 +82,7 @@ MANAGING THE PNR
 - IR -- after ending a PNR, shows the airline's own record locator for each air segment (a partial redisplay).
 - JA, JB, JC, JD, JE, JF -- jump to work area A-F. Each area keeps its own PNR in progress and its own availability display, so a learner can work several bookings side by side. JO shows the status of every area. The trainer won't let RT<LOCATOR> overwrite an unsaved PNR: end it (ER/ET), ignore it (IG), or retrieve in a different area.
 - DAC<code> -- decode a city/airport code to its name. DAN <text> -- the reverse, name to code.
-- DNA<code> -- decode an airline code to its name (e.g. DNAEK -> EMIRATES). DNA <text> -- the reverse, name to code (e.g. DNA EMIRATES -> EK). Bidirectional, same style as DAC/DAN.
+- DNA<code> -- decode an airline code to its name. Takes either the IATA code (DNAEK) or the ICAO code (DNAUAE) -- same airline, both work. DNA <text> -- the reverse, name to code (e.g. DNA EMIRATES -> EK/UAE). Bidirectional, same style as DAC/DAN.
 
 OTHER TRAINER FEATURES (not real Amadeus commands -- mention only if relevant)
 - CLS clears the visible screen without touching the PNR.

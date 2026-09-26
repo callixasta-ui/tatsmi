@@ -113,7 +113,7 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     section: "REFERENCE & TRAINER-ONLY",
     rows: [
       { cmd: "DACLON / DAN BANGKOK", desc: "Decode a city code / encode a city name" },
-      { cmd: "DNAEK / DNA EMIRATES", desc: "Decode an airline code / encode an airline name (bidirectional)" },
+      { cmd: "DNAEK / DNACEB / DNA EMIRATES", desc: "Decode an airline by IATA (EK) or ICAO (CEB) code / encode a name to its code (bidirectional)" },
       { cmd: "HE / HE TKTL", desc: "Help list, or help on one entry" },
       { cmd: "CLS", desc: "Clear the screen (trainer convenience, not real Amadeus)" },
     ],
