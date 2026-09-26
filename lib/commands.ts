@@ -241,7 +241,60 @@ interface AirlineRecord {
   icao: string;
   numeric?: string;
   name: string;
+  // Real nonstop-route modeling, not just "is this a known airline": hubs
+  // are the actual city/base codes this carrier operates from (matched
+  // against LOCATIONS' city codes, e.g. "LON" not "LHR"). Since this demo
+  // only generates nonstop flights (see FlightRow.stops, always 0), the
+  // same rule real airline networks follow applies here: a carrier only
+  // shows up on a route if ONE of the two endpoints is actually one of
+  // its own hubs -- nonstop service radiates from a base, it doesn't
+  // appear between two cities the airline has no presence in at all.
+  // "global" reach carriers (the big legacy/Gulf/Asian flag carriers)
+  // can be booked hub-to-anywhere; "regional" reach carriers (LCCs and
+  // smaller flag carriers) are further limited to routes where the OTHER
+  // end is inside one of their homeRegions -- e.g. Cebu Pacific reaches
+  // East Asia/Oceania/the Gulf from Manila, but not Europe or the
+  // Americas. Carriers whose real-world hub isn't in this trainer's
+  // airport table (WY/Muscat, GF/Bahrain) get hubs: [] and so correctly
+  // never appear -- same as real Amadeus has nothing to offer for a place
+  // outside its database.
+  hubs: string[];
+  reach: "regional" | "global";
+  homeRegions?: Region[]; // required (and only meaningful) when reach === "regional"
 }
+
+// Coarse commercial regions used only to bound where a "regional" carrier
+// plausibly flies to from its hub -- not a precise geography, just enough
+// to stop e.g. a Philippines-based LCC from turning up on a Europe-South
+// America route.
+type Region =
+  | "NORTH_AMERICA"
+  | "LATAM"
+  | "EUROPE"
+  | "MIDDLE_EAST"
+  | "AFRICA"
+  | "SOUTH_ASIA"
+  | "EAST_ASIA"
+  | "SOUTHEAST_ASIA"
+  | "OCEANIA";
+
+const REGION_BY_COUNTRY: Record<string, Region> = {
+  US: "NORTH_AMERICA", CA: "NORTH_AMERICA",
+  MX: "LATAM", BR: "LATAM", AR: "LATAM", PE: "LATAM", CO: "LATAM", CL: "LATAM",
+  GB: "EUROPE", FR: "EUROPE", IT: "EUROPE", DE: "EUROPE", ES: "EUROPE", NL: "EUROPE",
+  BE: "EUROPE", CH: "EUROPE", AT: "EUROPE", PT: "EUROPE", IE: "EUROPE", DK: "EUROPE",
+  NO: "EUROPE", FI: "EUROPE", PL: "EUROPE", CZ: "EUROPE", HU: "EUROPE", GR: "EUROPE",
+  SE: "EUROPE", RU: "EUROPE",
+  AE: "MIDDLE_EAST", QA: "MIDDLE_EAST", SA: "MIDDLE_EAST", KW: "MIDDLE_EAST",
+  JO: "MIDDLE_EAST", IL: "MIDDLE_EAST", TR: "MIDDLE_EAST",
+  EG: "AFRICA", ZA: "AFRICA", KE: "AFRICA", NG: "AFRICA", ET: "AFRICA",
+  IN: "SOUTH_ASIA", NP: "SOUTH_ASIA", BD: "SOUTH_ASIA", LK: "SOUTH_ASIA", PK: "SOUTH_ASIA",
+  JP: "EAST_ASIA", KR: "EAST_ASIA", CN: "EAST_ASIA", TW: "EAST_ASIA", HK: "EAST_ASIA", MO: "EAST_ASIA",
+  TH: "SOUTHEAST_ASIA", PH: "SOUTHEAST_ASIA", MY: "SOUTHEAST_ASIA", ID: "SOUTHEAST_ASIA",
+  SG: "SOUTHEAST_ASIA", VN: "SOUTHEAST_ASIA", KH: "SOUTHEAST_ASIA", MM: "SOUTHEAST_ASIA",
+  LA: "SOUTHEAST_ASIA", BN: "SOUTHEAST_ASIA",
+  AU: "OCEANIA", NZ: "OCEANIA", FJ: "OCEANIA", GU: "OCEANIA",
+};
 
 // This is the single source of truth for every airline this trainer
 // knows about: DNA decodes/encodes against it, AN/SN/TN generate flights
@@ -249,64 +302,65 @@ interface AirlineRecord {
 // displays and ticket-number generation both resolve through it too --
 // so an airline that's "real" in one command is real everywhere. Real
 // Amadeus covers the full IATA/ICAO airline list; this is a curated
-// subset of major carriers.
+// subset of major carriers, and hubs/reach below are a best-effort real-
+// world approximation, not a licensed route database.
 const AIRLINE_RECORDS: AirlineRecord[] = [
-  { iata: "BA", icao: "BAW", numeric: "125", name: "BRITISH AIRWAYS" },
-  { iata: "LH", icao: "DLH", numeric: "220", name: "LUFTHANSA" },
-  { iata: "AF", icao: "AFR", numeric: "057", name: "AIR FRANCE" },
-  { iata: "TG", icao: "THA", numeric: "217", name: "THAI AIRWAYS INTERNATIONAL" },
-  { iata: "SQ", icao: "SIA", numeric: "618", name: "SINGAPORE AIRLINES" },
-  { iata: "EK", icao: "UAE", numeric: "176", name: "EMIRATES" },
-  { iata: "QF", icao: "QFA", numeric: "081", name: "QANTAS AIRWAYS" },
-  { iata: "CX", icao: "CPA", numeric: "160", name: "CATHAY PACIFIC AIRWAYS" },
-  { iata: "AA", icao: "AAL", numeric: "001", name: "AMERICAN AIRLINES" },
-  { iata: "UA", icao: "UAL", numeric: "016", name: "UNITED AIRLINES" },
-  { iata: "DL", icao: "DAL", numeric: "006", name: "DELTA AIR LINES" },
-  { iata: "AC", icao: "ACA", numeric: "014", name: "AIR CANADA" },
-  { iata: "KL", icao: "KLM", numeric: "074", name: "KLM ROYAL DUTCH AIRLINES" },
-  { iata: "IB", icao: "IBE", numeric: "075", name: "IBERIA" },
-  { iata: "AZ", icao: "ITY", numeric: "055", name: "ITA AIRWAYS" },
-  { iata: "LX", icao: "SWR", numeric: "724", name: "SWISS INTERNATIONAL AIR LINES" },
-  { iata: "OS", icao: "AUA", numeric: "257", name: "AUSTRIAN AIRLINES" },
-  { iata: "TK", icao: "THY", numeric: "235", name: "TURKISH AIRLINES" },
-  { iata: "QR", icao: "QTR", numeric: "157", name: "QATAR AIRWAYS" },
-  { iata: "EY", icao: "ETD", numeric: "607", name: "ETIHAD AIRWAYS" },
-  { iata: "SV", icao: "SVA", numeric: "065", name: "SAUDIA" },
-  { iata: "RJ", icao: "RJA", numeric: "512", name: "ROYAL JORDANIAN" },
-  { iata: "ET", icao: "ETH", numeric: "071", name: "ETHIOPIAN AIRLINES" },
-  { iata: "MS", icao: "MSR", numeric: "077", name: "EGYPTAIR" },
-  { iata: "KQ", icao: "KQA", numeric: "706", name: "KENYA AIRWAYS" },
-  { iata: "SA", icao: "SAA", numeric: "083", name: "SOUTH AFRICAN AIRWAYS" },
-  { iata: "NZ", icao: "ANZ", numeric: "086", name: "AIR NEW ZEALAND" },
-  { iata: "JQ", icao: "JST", name: "JETSTAR AIRWAYS" },
-  { iata: "VA", icao: "VOZ", name: "VIRGIN AUSTRALIA" },
-  { iata: "NH", icao: "ANA", numeric: "205", name: "ALL NIPPON AIRWAYS" },
-  { iata: "JL", icao: "JAL", numeric: "131", name: "JAPAN AIRLINES" },
-  { iata: "KE", icao: "KAL", numeric: "180", name: "KOREAN AIR" },
-  { iata: "OZ", icao: "AAR", numeric: "988", name: "ASIANA AIRLINES" },
-  { iata: "CI", icao: "CAL", numeric: "297", name: "CHINA AIRLINES" },
-  { iata: "BR", icao: "EVA", numeric: "695", name: "EVA AIR" },
-  { iata: "MU", icao: "CES", numeric: "781", name: "CHINA EASTERN AIRLINES" },
-  { iata: "CA", icao: "CCA", numeric: "999", name: "AIR CHINA" },
-  { iata: "CZ", icao: "CSN", numeric: "784", name: "CHINA SOUTHERN AIRLINES" },
-  { iata: "PR", icao: "PAL", numeric: "079", name: "PHILIPPINE AIRLINES" },
-  { iata: "5J", icao: "CEB", numeric: "203", name: "CEBU PACIFIC AIR" },
-  { iata: "MH", icao: "MAS", numeric: "232", name: "MALAYSIA AIRLINES" },
-  { iata: "AK", icao: "AXM", name: "AIRASIA" },
-  { iata: "GA", icao: "GIA", numeric: "126", name: "GARUDA INDONESIA" },
-  { iata: "VN", icao: "HVN", numeric: "738", name: "VIETNAM AIRLINES" },
-  { iata: "AI", icao: "AIC", numeric: "098", name: "AIR INDIA" },
-  { iata: "6E", icao: "IGO", numeric: "312", name: "INDIGO" },
-  { iata: "UL", icao: "ALK", numeric: "603", name: "SRILANKAN AIRLINES" },
-  { iata: "PK", icao: "PIA", numeric: "214", name: "PAKISTAN INTERNATIONAL AIRLINES" },
-  { iata: "LA", icao: "LAN", numeric: "045", name: "LATAM AIRLINES" },
-  { iata: "AV", icao: "AVA", numeric: "134", name: "AVIANCA" },
-  { iata: "AM", icao: "AMX", numeric: "139", name: "AEROMEXICO" },
-  { iata: "WS", icao: "WJA", numeric: "838", name: "WESTJET" },
-  { iata: "FZ", icao: "FDB", name: "FLYDUBAI" },
-  { iata: "WY", icao: "OMA", numeric: "910", name: "OMAN AIR" },
-  { iata: "GF", icao: "GFA", numeric: "072", name: "GULF AIR" },
-  { iata: "LY", icao: "ELY", numeric: "114", name: "EL AL ISRAEL AIRLINES" },
+  { iata: "BA", icao: "BAW", numeric: "125", name: "BRITISH AIRWAYS", hubs: ["LON"], reach: "global" },
+  { iata: "LH", icao: "DLH", numeric: "220", name: "LUFTHANSA", hubs: ["FRA", "MUC"], reach: "global" },
+  { iata: "AF", icao: "AFR", numeric: "057", name: "AIR FRANCE", hubs: ["PAR"], reach: "global" },
+  { iata: "TG", icao: "THA", numeric: "217", name: "THAI AIRWAYS INTERNATIONAL", hubs: ["BKK"], reach: "global" },
+  { iata: "SQ", icao: "SIA", numeric: "618", name: "SINGAPORE AIRLINES", hubs: ["SIN"], reach: "global" },
+  { iata: "EK", icao: "UAE", numeric: "176", name: "EMIRATES", hubs: ["DXB"], reach: "global" },
+  { iata: "QF", icao: "QFA", numeric: "081", name: "QANTAS AIRWAYS", hubs: ["SYD", "MEL", "BNE", "PER"], reach: "global" },
+  { iata: "CX", icao: "CPA", numeric: "160", name: "CATHAY PACIFIC AIRWAYS", hubs: ["HKG"], reach: "global" },
+  { iata: "AA", icao: "AAL", numeric: "001", name: "AMERICAN AIRLINES", hubs: ["CHI", "DFW", "MIA", "CLT", "PHX", "PHL", "NYC", "LAX"], reach: "global" },
+  { iata: "UA", icao: "UAL", numeric: "016", name: "UNITED AIRLINES", hubs: ["CHI", "IAH", "DEN", "SFO", "WAS", "NYC", "LAX"], reach: "global" },
+  { iata: "DL", icao: "DAL", numeric: "006", name: "DELTA AIR LINES", hubs: ["ATL", "DTW", "MSP", "SLC", "NYC", "SEA", "BOS", "LAX"], reach: "global" },
+  { iata: "AC", icao: "ACA", numeric: "014", name: "AIR CANADA", hubs: ["YYZ", "YVR", "YUL", "YYC"], reach: "global" },
+  { iata: "KL", icao: "KLM", numeric: "074", name: "KLM ROYAL DUTCH AIRLINES", hubs: ["AMS"], reach: "global" },
+  { iata: "IB", icao: "IBE", numeric: "075", name: "IBERIA", hubs: ["MAD", "BCN"], reach: "global" },
+  { iata: "AZ", icao: "ITY", numeric: "055", name: "ITA AIRWAYS", hubs: ["ROM", "MIL"], reach: "global" },
+  { iata: "LX", icao: "SWR", numeric: "724", name: "SWISS INTERNATIONAL AIR LINES", hubs: ["ZRH", "GVA"], reach: "global" },
+  { iata: "OS", icao: "AUA", numeric: "257", name: "AUSTRIAN AIRLINES", hubs: ["VIE"], reach: "global" },
+  { iata: "TK", icao: "THY", numeric: "235", name: "TURKISH AIRLINES", hubs: ["IST"], reach: "global" },
+  { iata: "QR", icao: "QTR", numeric: "157", name: "QATAR AIRWAYS", hubs: ["DOH"], reach: "global" },
+  { iata: "EY", icao: "ETD", numeric: "607", name: "ETIHAD AIRWAYS", hubs: ["AUH"], reach: "global" },
+  { iata: "SV", icao: "SVA", numeric: "065", name: "SAUDIA", hubs: ["RUH", "JED"], reach: "global" },
+  { iata: "RJ", icao: "RJA", numeric: "512", name: "ROYAL JORDANIAN", hubs: ["AMM"], reach: "regional", homeRegions: ["MIDDLE_EAST", "EUROPE"] },
+  { iata: "ET", icao: "ETH", numeric: "071", name: "ETHIOPIAN AIRLINES", hubs: ["ADD"], reach: "global" },
+  { iata: "MS", icao: "MSR", numeric: "077", name: "EGYPTAIR", hubs: ["CAI"], reach: "global" },
+  { iata: "KQ", icao: "KQA", numeric: "706", name: "KENYA AIRWAYS", hubs: ["NBO"], reach: "global" },
+  { iata: "SA", icao: "SAA", numeric: "083", name: "SOUTH AFRICAN AIRWAYS", hubs: ["JNB"], reach: "global" },
+  { iata: "NZ", icao: "ANZ", numeric: "086", name: "AIR NEW ZEALAND", hubs: ["AKL"], reach: "global" },
+  { iata: "JQ", icao: "JST", name: "JETSTAR AIRWAYS", hubs: ["SYD", "MEL"], reach: "regional", homeRegions: ["OCEANIA", "SOUTHEAST_ASIA"] },
+  { iata: "VA", icao: "VOZ", name: "VIRGIN AUSTRALIA", hubs: ["SYD", "BNE", "MEL"], reach: "regional", homeRegions: ["OCEANIA", "SOUTHEAST_ASIA", "NORTH_AMERICA"] },
+  { iata: "NH", icao: "ANA", numeric: "205", name: "ALL NIPPON AIRWAYS", hubs: ["TYO"], reach: "global" },
+  { iata: "JL", icao: "JAL", numeric: "131", name: "JAPAN AIRLINES", hubs: ["TYO"], reach: "global" },
+  { iata: "KE", icao: "KAL", numeric: "180", name: "KOREAN AIR", hubs: ["SEL"], reach: "global" },
+  { iata: "OZ", icao: "AAR", numeric: "988", name: "ASIANA AIRLINES", hubs: ["SEL"], reach: "global" },
+  { iata: "CI", icao: "CAL", numeric: "297", name: "CHINA AIRLINES", hubs: ["TPE"], reach: "global" },
+  { iata: "BR", icao: "EVA", numeric: "695", name: "EVA AIR", hubs: ["TPE"], reach: "global" },
+  { iata: "MU", icao: "CES", numeric: "781", name: "CHINA EASTERN AIRLINES", hubs: ["PVG", "CTU"], reach: "global" },
+  { iata: "CA", icao: "CCA", numeric: "999", name: "AIR CHINA", hubs: ["PEK"], reach: "global" },
+  { iata: "CZ", icao: "CSN", numeric: "784", name: "CHINA SOUTHERN AIRLINES", hubs: ["CAN"], reach: "global" },
+  { iata: "PR", icao: "PAL", numeric: "079", name: "PHILIPPINE AIRLINES", hubs: ["MNL", "CEB"], reach: "global" },
+  { iata: "5J", icao: "CEB", numeric: "203", name: "CEBU PACIFIC AIR", hubs: ["MNL", "CEB"], reach: "regional", homeRegions: ["SOUTHEAST_ASIA", "EAST_ASIA", "OCEANIA", "MIDDLE_EAST"] },
+  { iata: "MH", icao: "MAS", numeric: "232", name: "MALAYSIA AIRLINES", hubs: ["KUL"], reach: "global" },
+  { iata: "AK", icao: "AXM", name: "AIRASIA", hubs: ["KUL"], reach: "regional", homeRegions: ["SOUTHEAST_ASIA", "EAST_ASIA", "SOUTH_ASIA"] },
+  { iata: "GA", icao: "GIA", numeric: "126", name: "GARUDA INDONESIA", hubs: ["CGK", "DPS"], reach: "global" },
+  { iata: "VN", icao: "HVN", numeric: "738", name: "VIETNAM AIRLINES", hubs: ["HAN", "SGN"], reach: "global" },
+  { iata: "AI", icao: "AIC", numeric: "098", name: "AIR INDIA", hubs: ["DEL", "BOM"], reach: "global" },
+  { iata: "6E", icao: "IGO", numeric: "312", name: "INDIGO", hubs: ["DEL", "BOM"], reach: "regional", homeRegions: ["SOUTH_ASIA", "SOUTHEAST_ASIA", "MIDDLE_EAST"] },
+  { iata: "UL", icao: "ALK", numeric: "603", name: "SRILANKAN AIRLINES", hubs: ["CMB"], reach: "global" },
+  { iata: "PK", icao: "PIA", numeric: "214", name: "PAKISTAN INTERNATIONAL AIRLINES", hubs: ["KHI", "ISB"], reach: "global" },
+  { iata: "LA", icao: "LAN", numeric: "045", name: "LATAM AIRLINES", hubs: ["SCL", "SAO", "LIM", "BOG"], reach: "global" },
+  { iata: "AV", icao: "AVA", numeric: "134", name: "AVIANCA", hubs: ["BOG"], reach: "global" },
+  { iata: "AM", icao: "AMX", numeric: "139", name: "AEROMEXICO", hubs: ["MEX"], reach: "global" },
+  { iata: "WS", icao: "WJA", numeric: "838", name: "WESTJET", hubs: ["YYC", "YYZ"], reach: "regional", homeRegions: ["NORTH_AMERICA", "LATAM", "EUROPE"] },
+  { iata: "FZ", icao: "FDB", name: "FLYDUBAI", hubs: ["DXB"], reach: "regional", homeRegions: ["MIDDLE_EAST", "SOUTH_ASIA", "AFRICA", "EUROPE"] },
+  { iata: "WY", icao: "OMA", numeric: "910", name: "OMAN AIR", hubs: [], reach: "global" }, // Muscat isn't in this trainer's airport table
+  { iata: "GF", icao: "GFA", numeric: "072", name: "GULF AIR", hubs: [], reach: "global" }, // Bahrain isn't in this trainer's airport table
+  { iata: "LY", icao: "ELY", numeric: "114", name: "EL AL ISRAEL AIRLINES", hubs: ["TLV"], reach: "global" },
 ];
 
 const AIRLINES_BY_IATA: Record<string, AirlineRecord> = {};
@@ -480,30 +534,38 @@ function buildAvailability(dateCode: string, origin: string, dest: string, q: Av
   const rows: FlightRow[] = [];
   let line = 1;
 
-  // With ~55 airlines on file and only 8 "slots" per unfiltered display,
-  // a real carrier drawn purely at random for those 8 slots misses most
-  // of the time -- so a perfectly plausible /A<CX> filter (an airline
-  // this trainer genuinely knows about) would come back empty far more
-  // often than real Amadeus ever would. Instead, once we know the filter
-  // names a real carrier, generate that carrier's own candidate flights
-  // directly (still deterministic per date+route+carrier, so re-running
-  // the same entry gives the same result) rather than leaving it to the
-  // luck of the unfiltered draw. An unrecognized carrier still legitimately
-  // returns no matches (see parseQualifiers' NOT IN THIS TRAINER'S note).
+  // Real-route modeling: a carrier only becomes a candidate for this
+  // route if airlineServesRoute() says it plausibly operates a nonstop
+  // there (see that function -- hub-touch + reach tier). This applies to
+  // BOTH the /A<code>-filtered case and the plain unfiltered display, so
+  // a bare "AN15DECLONBKK" now only shows carriers with a real presence
+  // at LON or BKK, not any of the ~55 airlines at random.
   const slots: { carrier: string; flightNo: string; seed: number }[] = [];
-  if (q.carrierFilter && CARRIERS.includes(q.carrierFilter)) {
-    for (let i = 1; i <= 3; i++) {
-      const r = seededRand(dateCode + origin + dest + q.carrierFilter, i);
-      slots.push({ carrier: q.carrierFilter, flightNo: String(100 + (r % 800)), seed: r });
+  if (q.carrierFilter) {
+    if (CARRIERS.includes(q.carrierFilter) && airlineServesRoute(q.carrierFilter, origin, dest)) {
+      // 6 candidates (not 1) so a carrier filter stacked with a time-of-
+      // day or class/cabin filter still has decent odds of a survivor --
+      // a real airline that genuinely serves this route shouldn't come
+      // back empty just because this trainer only imagined one departure.
+      for (let i = 1; i <= 6; i++) {
+        const r = seededRand(dateCode + origin + dest + q.carrierFilter, i);
+        slots.push({ carrier: q.carrierFilter, flightNo: String(100 + (r % 800)), seed: r });
+      }
     }
-  } else if (!q.carrierFilter) {
-    for (let i = 1; i <= 8; i++) {
+    // else: either not a carrier this trainer knows (parseQualifiers already
+    // flagged that), or a real carrier that just doesn't fly this route --
+    // both correctly fall through to "NO FLIGHTS MATCH", same as real Amadeus.
+  } else {
+    const plausible = CARRIERS.filter((c) => airlineServesRoute(c, origin, dest));
+    // Some city pairs genuinely aren't served nonstop by anyone in this
+    // trainer's airline table -- plausible stays empty and so does the
+    // display, which is itself realistic (a real GDS often needs -MD- /
+    // a connection for an obscure pair too), not a bug.
+    for (let i = 1; i <= 8 && plausible.length > 0; i++) {
       const r = seededRand(dateCode + origin + dest, i);
-      slots.push({ carrier: CARRIERS[r % CARRIERS.length], flightNo: String(100 + (r % 800)), seed: r });
+      slots.push({ carrier: plausible[r % plausible.length], flightNo: String(100 + (r % 800)), seed: r });
     }
   }
-  // q.carrierFilter set but NOT a recognized carrier -> slots stays empty,
-  // rows stays empty, "NO FLIGHTS MATCH" is shown (correct: unknown airline).
 
   for (const { carrier, flightNo, seed: r } of slots) {
     const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
@@ -547,9 +609,14 @@ function buildAvailability(dateCode: string, origin: string, dest: string, q: Av
 function buildTimetable(dateCode: string, origin: string, dest: string): TimetableRow[] {
   const rows: TimetableRow[] = [];
   const DOW_PATTERNS = ["D", "1234567", "X2", "X6", "2346", "1357", "X7"];
-  for (let i = 1; i <= 6; i++) {
+  // Same real-route model as AN/SN (see airlineServesRoute): a timetable
+  // should only list carriers that actually operate this city pair, not
+  // any of the ~55 airlines at random. If nobody in this trainer's table
+  // plausibly serves it, an empty timetable is the honest answer.
+  const plausible = CARRIERS.filter((c) => airlineServesRoute(c, origin, dest));
+  for (let i = 1; i <= 6 && plausible.length > 0; i++) {
     const r = seededRand("TN" + dateCode + origin + dest, i);
-    const carrier = CARRIERS[r % CARRIERS.length];
+    const carrier = plausible[r % plausible.length];
     const flightNo = String(100 + (r % 800));
     const base = baseFlightDetails(carrier, flightNo, dateCode, origin, dest);
     const eff = shiftDate(dateCode, -((r >>> 10) % 120));
@@ -855,6 +922,41 @@ function cityName(code: string): string {
 }
 function countryCode(code: string): string {
   return LOCATIONS[code]?.countryCode ?? "XX";
+}
+
+// Normalizes an AIRPORT code to the metro CITY code it belongs to (so an
+// airline's hub list, which is written in city codes like "LON"/"NYC", still
+// matches when the user queried a specific airport like "LHR"/"JFK"). CITY
+// codes and single-airport-city codes (already city-level, e.g. "LAX") pass
+// through unchanged.
+function cityCodeFor(code: string): string {
+  const loc = LOCATIONS[code];
+  if (loc?.type === "AIRPORT" && loc.cityCode) return loc.cityCode;
+  return code;
+}
+
+// The core of the real-route model: does this carrier plausibly operate a
+// NONSTOP flight between origin and dest? Real Amadeus answers this from
+// live airline schedules; this trainer answers it from each carrier's
+// actual hub list plus a reach tier (see AirlineRecord above). Since every
+// generated flight here is nonstop, requiring a hub at one end mirrors how
+// real point-to-point networks are actually built.
+function airlineServesRoute(carrier: string, origin: string, dest: string): boolean {
+  const rec = AIRLINES_BY_IATA[carrier];
+  if (!rec) return false;
+  const originCity = cityCodeFor(origin);
+  const destCity = cityCodeFor(dest);
+  const hubAtOrigin = rec.hubs.includes(originCity);
+  const hubAtDest = rec.hubs.includes(destCity);
+  if (!hubAtOrigin && !hubAtDest) return false;
+  if (rec.reach === "global") return true;
+  // Regional carrier: the END THAT ISN'T THE HUB must fall inside one of
+  // its home regions (if both ends are hubs of this carrier, it trivially
+  // qualifies -- a carrier can always fly between two of its own bases).
+  if (hubAtOrigin && hubAtDest) return true;
+  const other = hubAtOrigin ? dest : origin;
+  const region = REGION_BY_COUNTRY[countryCode(other)];
+  return !!region && !!rec.homeRegions?.includes(region);
 }
 
 // If `code` is a multi-airport metro/city code, deterministically pick one
@@ -1269,6 +1371,10 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const rows = buildTimetable(dateCode, origin, dest);
     out.push(`${origin}${dest}`);
     out.push(`** AMADEUS - TN ** ${dest} ${cityName(dest)}.${countryCode(dest)}   ${dateCode}${yy} ${endCode}${yy}`);
+    if (rows.length === 0) {
+      out.push(" NO FLIGHTS TIMETABLED FOR THIS CITY PAIR");
+      return { lines: out, state: s };
+    }
     rows.forEach((r) => {
       out.push(
         ` ${r.line} ${r.carrier} ${pad(r.flightNo, 4)} ${pad(r.dow, 8)} ${r.origin}${r.originTerm}  ${r.dest}${r.destTerm}  ` +
