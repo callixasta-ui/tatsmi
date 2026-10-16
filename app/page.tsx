@@ -65,33 +65,14 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     rows: [
       { cmd: "NM1SMITH/JOHN MR", desc: "Add passenger name (title optional)" },
       { cmd: "AP 6621234567", desc: "Phone contact" },
-<<<<<<< HEAD
       { cmd: "apm-09123456789/P1", desc: "Mobile contact for passenger 1 (hyphen, then /P + passenger number: /P2, /P3...)" },
       { cmd: "APH 021234567", desc: "Home contact" },
       { cmd: "ape-exazakana@gmail.com/P1", desc: "Email contact for passenger 1 (same format; /P2 for the second passenger...)" },
-=======
-      { cmd: "APM 09171234567", desc: "Mobile contact" },
-      { cmd: "APH 021234567", desc: "Home contact" },
-      { cmd: "APE john@mail.com", desc: "Email contact (not plain AP)" },
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
       { cmd: "TKOK / TKTL20JAN/1700", desc: "Ticketing arrangement: no limit / real date+time deadline" },
       { cmd: "RF JDOE", desc: "Received From -- your signature, mandatory" },
     ],
   },
   {
-<<<<<<< HEAD
-=======
-    section: "OPTIONAL ELEMENTS",
-    rows: [
-      { cmd: "RM VIP PAX", desc: "Free-text remark" },
-      { cmd: "OS CTC AT WORK", desc: "Other service info (shows as OSI on the PNR)" },
-      { cmd: "FFN BA1234567", desc: "Frequent flyer number" },
-      { cmd: "SM / SM2", desc: "Seat map (last segment, or segment n)" },
-      { cmd: "ST/24A/P1", desc: "Assign seat 24A to passenger 1" },
-    ],
-  },
-  {
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
     section: "TRANSACT & FIX MISTAKES",
     rows: [
       { cmd: "RT", desc: "Redisplay the active (in-progress) PNR, elements numbered" },
@@ -103,18 +84,6 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     ],
   },
   {
-<<<<<<< HEAD
-=======
-    section: "PRICE, PAY & ISSUE THE TICKET (needs a SAVED PNR)",
-    rows: [
-      { cmd: "FXP", desc: "Fare quote for the active PNR -- stores the price as a TST (T01, T02...)" },
-      { cmd: "FP CASH", desc: "Form of payment -- cash (or FP CHEQUE)" },
-      { cmd: "FP CCVI4444333322221111/0128", desc: "Form of payment -- credit card (2-letter vendor + number + MMYY)" },
-      { cmd: "TTP", desc: "Issue the ticket(s), using the TST + FP on file -- this is what actually produces a ticket number, unlike TKOK/TKTL" },
-    ],
-  },
-  {
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
     section: "WORK AREAS (SEVERAL BOOKINGS AT ONCE)",
     rows: [
       { cmd: "JB", desc: "Jump to work area B (JA-JF). Each area keeps its own PNR in progress" },
@@ -361,10 +330,6 @@ export default function Page() {
   const savedList = Object.values(engine.savedPNRs).sort((a, b) => (a.locator! > b.locator! ? 1 : -1));
   const totalPax = savedList.reduce((sum, p) => sum + p.names.length, 0);
   const withDeadline = savedList.filter((p) => p.ticketing?.startsWith("TKTL")).length;
-<<<<<<< HEAD
-=======
-  const ticketed = savedList.filter((p) => p.tickets && p.tickets.length > 0).length;
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
 
   return (
     <div id="root-wrap" onClick={(e) => {
@@ -736,10 +701,6 @@ export default function Page() {
                   <div className="db-stat"><span className="db-stat-num">{savedList.length}</span>bookings</div>
                   <div className="db-stat"><span className="db-stat-num">{totalPax}</span>passengers</div>
                   <div className="db-stat"><span className="db-stat-num">{withDeadline}</span>with a deadline</div>
-<<<<<<< HEAD
-=======
-                  <div className="db-stat"><span className="db-stat-num">{ticketed}</span>ticketed</div>
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
                 </div>
                 {savedList.length === 0 && (
                   <div className="task-goal" style={{ marginTop: 10 }}>
@@ -752,18 +713,6 @@ export default function Page() {
                     <div className="db-row">{pnr.names.map((n) => `${n.last}/${n.first}`).join(", ") || "(no names)"}</div>
                     <div className="db-row db-dim">{pnrRoute(pnr)}</div>
                     <div className="db-row db-dim">{pnr.ticketing ?? "no ticketing arrangement"} &middot; RF {pnr.receivedFrom ?? "--"}</div>
-<<<<<<< HEAD
-=======
-                    {pnr.tickets && pnr.tickets.length > 0 ? (
-                      <div className="db-row db-dim">
-                        TICKETED: {pnr.tickets.map((t) => `${t.number} (${t.passenger})`).join(", ")}
-                      </div>
-                    ) : (
-                      <div className="db-row db-dim">
-                        {pnr.tst && pnr.tst.some((t) => !t.used) ? "PRICED (FXP) - NOT YET TICKETED" : "NOT PRICED / NOT TICKETED"}
-                      </div>
-                    )}
->>>>>>> ba345df9834e88cc206b0f3199c4d86cfc5d4435
                     <div className="db-actions">
                       <button className="hint-btn" onClick={() => retrieveFromDashboard(pnr.locator!)}>View / Retrieve</button>
                       <button className="hint-btn db-delete" onClick={() => deleteFromDashboard(pnr.locator!)}>Delete</button>
