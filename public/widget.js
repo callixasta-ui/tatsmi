@@ -20,6 +20,8 @@
     maxDailyMessages: 30,
     maxAttachments: 10,
     maxFileSizeMB: 8,
+    maxOutputTokens: 1024,   // reply length cap sent to the model
+    historyTtlDays: 7,       // saved conversation is wiped this many days after it started
     storageKey: 'ai_widget',
     position: 'bottom-right', // 'bottom-right' | 'bottom-left'
     welcomeMessage: "👋 Hi! I'm your AI assistant. Ask me anything!",
@@ -32,7 +34,14 @@
   const MAX_ATTACHMENTS = config.maxAttachments;
   const MAX_FILE_SIZE = config.maxFileSizeMB * 1024 * 1024;
   const LIMIT_KEY = config.storageKey + '_limit';
-  const SESSION_KEY = config.storageKey + '_session';
+  const HISTORY_KEY = config.storageKey + '_history';
+  const LEGACY_SESSION_KEY = config.storageKey + '_session'; // old sessionStorage copy, migrated once
+  const HISTORY_TTL_MS = (Number(config.historyTtlDays) > 0 ? Number(config.historyTtlDays) : 7) * 24 * 60 * 60 * 1000;
+  const MAX_STORED_TURNS = 40;
+  const MAX_BODY_CHARS = 4200000;     // stay under Vercel's ~4.5 MB request limit
+  const MAX_NEW_ATTACH_CHARS = 3500000;
+  const REQUEST_TIMEOUT_MS = 28000;
+  let convoStartedAt = null;          // when the saved conversation began (for the 7-day wipe)
   const POS_KEY = config.storageKey + '_pos';
   const SYSTEM = config.systemPrompt;
   const CHAT_ENDPOINT = config.apiEndpoint;
@@ -60,18 +69,59 @@
     try { localStorage.setItem(LIMIT_KEY, JSON.stringify({ count: l.date === today() ? l.count + 1 : 1, date: today() })); } catch {}
   }
 
+  // Conversation is saved in localStorage (survives closing the panel, reloads,
+  // new tabs and browser restarts) and wiped HISTORY_TTL_MS after it started.
+  function isExpired(startedAt) { return !startedAt || (Date.now() - startedAt) > HISTORY_TTL_MS; }
+
   function loadHistory() {
-    try { const r = sessionStorage.getItem(SESSION_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.history)) {
+          if (isExpired(data.startedAt)) { localStorage.removeItem(HISTORY_KEY); return []; }
+          convoStartedAt = data.startedAt;
+          return data.history;
+        }
+      }
+    } catch {}
+    // One-time migration from the old per-tab sessionStorage copy.
+    try {
+      const legacy = sessionStorage.getItem(LEGACY_SESSION_KEY);
+      if (legacy) {
+        sessionStorage.removeItem(LEGACY_SESSION_KEY);
+        const h = JSON.parse(legacy);
+        if (Array.isArray(h) && h.length) { convoStartedAt = Date.now(); return h; }
+      }
+    } catch {}
+    return [];
+  }
+
+  // Never persist raw attachment bytes -- they blow the storage quota and made
+  // saves fail silently. The small thumbnail in `display` is enough to redraw the chat.
+  function stripForStorage(h) {
+    return h.map(m => {
+      if (!m.parts || !m.parts.some(p => p.inlineData)) return m;
+      const t = m.parts.filter(p => p.text).map(p => p.text).join('\n');
+      return Object.assign({}, m, { parts: [{ text: (t ? t + ' ' : '') + '[attachment omitted from saved history]' }] });
+    });
   }
   function saveHistory(h) {
-    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(h)); }
-    catch {
-      // Likely quota exceeded (large attachments) — drop oldest turns and retry once.
+    if (!convoStartedAt) convoStartedAt = Date.now();
+    let turns = stripForStorage(h).slice(-MAX_STORED_TURNS);
+    for (;;) {
       try {
-        const trimmed = h.slice(-10);
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(trimmed));
-      } catch {}
+        localStorage.setItem(HISTORY_KEY, JSON.stringify({ startedAt: convoStartedAt, history: turns }));
+        return;
+      } catch {
+        if (turns.length <= 2) return;
+        turns = turns.slice(2); // quota still exceeded: drop the oldest exchange and retry
+      }
     }
+  }
+  function clearStoredHistory() {
+    convoStartedAt = null;
+    try { localStorage.removeItem(HISTORY_KEY); } catch {}
   }
 
   function loadPos() {
@@ -79,6 +129,26 @@
   }
   function savePos(left, top) {
     try { localStorage.setItem(POS_KEY, JSON.stringify({ left, top })); } catch {}
+  }
+
+  // Small JPEG thumbnail so saved chats stay tiny.
+  function makeThumb(dataUrl, size) {
+    size = size || 96;
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, size / Math.max(img.naturalWidth, img.naturalHeight));
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          resolve(c.toDataURL('image/jpeg', 0.7));
+        } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
   }
 
   function escapeHtml(str) {
@@ -149,6 +219,7 @@
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12 20 4.5 15 19.5l-3.5-6.5L4.5 12Z"/><path d="M11.5 13 15.5 9"/></svg>',
     close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     crop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>',
+    newchat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>',
     remove: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/><path d="M14 2v6h6"/></svg>',
     image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
@@ -174,11 +245,12 @@
     #ar-header .ar-avatar{width:34px;height:34px;border-radius:50%;background:var(--ar-accent);color:#fff;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
     #ar-header .ar-name{font-size:13.5px;font-weight:700;color:var(--ar-text)}
     #ar-header .ar-sub{font-size:11px;color:var(--ar-muted);margin-top:1px}
-    #ar-close{background:none;border:none;cursor:pointer;color:var(--ar-muted);padding:6px;border-radius:8px;line-height:1;transition:background .15s;display:flex}
-    #ar-close svg{width:16px;height:16px}
-    #ar-close:hover{background:var(--ar-surface2)}
-    #ar-messages{flex:1;overflow-y:auto;padding:14px 14px 8px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth;min-height:120px}
-    .ar-msg{max-width:88%;font-size:13px;line-height:1.55;padding:9px 13px;border-radius:14px;word-break:break-word}
+    #ar-close,#ar-new{background:none;border:none;cursor:pointer;color:var(--ar-muted);padding:6px;border-radius:8px;line-height:1;transition:background .15s;display:flex}
+    #ar-close svg,#ar-new svg{width:16px;height:16px}
+    #ar-close:hover,#ar-new:hover{background:var(--ar-surface2)}
+    #ar-header .ar-hbtns{display:flex;align-items:center;gap:2px}
+    #ar-messages{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding:14px 14px 8px;display:flex;flex-direction:column;gap:10px}
+    .ar-msg{max-width:88%;min-width:0;flex-shrink:0;font-size:13px;line-height:1.55;padding:9px 13px;border-radius:14px;word-break:break-word;overflow-wrap:anywhere}
     .ar-msg.bot{background:var(--ar-surface2);color:var(--ar-text);align-self:flex-start;border-bottom-left-radius:4px}
     .ar-msg.user{background:var(--ar-accent);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
     .ar-msg.bot a{color:var(--ar-accent);text-decoration:underline}
@@ -192,7 +264,7 @@
     .ar-typing span:nth-child(2){animation-delay:.15s}
     .ar-typing span:nth-child(3){animation-delay:.3s}
     @keyframes ar-bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
-    #ar-footer{border-top:1px solid var(--ar-border);padding:10px 12px 12px;background:var(--ar-surface);flex-shrink:0}
+    #ar-footer{border-top:1px solid var(--ar-border);padding:10px 12px 12px;background:var(--ar-surface);flex-shrink:0;max-height:55%;overflow-y:auto}
     #ar-limit-bar{font-size:10.5px;color:var(--ar-muted);margin-bottom:7px;text-align:right}
     #ar-limit-bar span{font-weight:600;color:var(--ar-text)}
     #ar-attachments{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
@@ -257,7 +329,10 @@
         <div class="ar-avatar"></div>
         <div><div class="ar-name">${escapeHtml(config.botName)}</div><div class="ar-sub">${escapeHtml(config.subtitle)}</div></div>
       </div>
-      <button id="ar-close" type="button" aria-label="Close">${ICONS.close}</button>
+      <div class="ar-hbtns">
+        <button id="ar-new" type="button" title="Start a new chat" aria-label="Start a new chat">${ICONS.newchat}</button>
+        <button id="ar-close" type="button" aria-label="Close">${ICONS.close}</button>
+      </div>
     </div>
     <div id="ar-messages"></div>
     <div id="ar-footer">
@@ -388,27 +463,25 @@
   fab.addEventListener('pointercancel', endDrag);
   fab.addEventListener('dragstart', (e) => e.preventDefault()); // belt-and-suspenders vs. native image drag
 
+  // The panel gets a FIXED height (messages scroll inside it). It used to be
+  // sized by its content, so `top` was computed while it only held the welcome
+  // message; a long answer then grew it downward past the edge of the screen.
   function positionPanel() {
     const fabRect = fab.getBoundingClientRect();
     const margin = 12;
-    const availH = vh() - 24;
-    panel.style.maxHeight = Math.min(560, availH) + 'px';
-
-    panel.style.visibility = 'hidden';
-    panel.classList.add('open');
-    const panelWidth = panel.offsetWidth || 340;
-    const panelHeight = panel.offsetHeight || 480;
-    panel.classList.remove('open');
-    panel.style.visibility = '';
+    const height = Math.min(540, vh() - margin * 2);
+    panel.style.height = height + 'px';
+    panel.style.maxHeight = 'none';
+    const width = panel.offsetWidth || 340;
 
     const top0 = vOffsetTop(), left0 = vOffsetLeft();
     let left = fabRect.left;
-    let top = fabRect.top - panelHeight - 10; // prefer opening above the FAB
+    let top = fabRect.top - height - 10; // prefer opening above the FAB
     if (top < top0 + margin) top = fabRect.bottom + 10; // not enough room above -> below
-    if (top + panelHeight > top0 + vh() - margin) top = top0 + vh() - panelHeight - margin;
+    if (top + height > top0 + vh() - margin) top = top0 + vh() - height - margin;
     if (top < top0 + margin) top = top0 + margin;
 
-    if (left + panelWidth > left0 + vw() - margin) left = left0 + vw() - panelWidth - margin;
+    if (left + width > left0 + vw() - margin) left = left0 + vw() - width - margin;
     if (left < left0 + margin) left = left0 + margin;
 
     panel.style.left = left + 'px';
@@ -455,12 +528,17 @@
   }
   
 
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
+  }
+
   function addMessage(role, text, atts) {
     const div = document.createElement('div');
     div.className = 'ar-msg ' + role;
     div.innerHTML = renderMarkdown(text || '') + attachmentsHtml(atts);
     messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToBottom();
     return div;
   }
 
@@ -469,7 +547,7 @@
     div.className = 'ar-msg bot';
     div.innerHTML = '<div class="ar-typing"><span></span><span></span><span></span></div>';
     messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToBottom();
     return div;
   }
 
@@ -485,7 +563,7 @@
         addMessage(role, text, atts);
       });
     }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToBottom();
   }
 
   function showInlineNotice(msg) {
@@ -733,27 +811,83 @@
     });
   }
 
-  async function sendToModel(userParts, historyForContext) {
-    const contents = [
-      { role: 'user',  parts: [{ text: SYSTEM }] },
-      { role: 'model', parts: [{ text: config.modelReadyReply || `Got it! I am ${config.botName}, ready to help.` }] },
-      ...historyForContext.map(h => ({ role: h.role, parts: h.parts })),
-      { role: 'user',  parts: userParts }
-    ];
+  function stripInline(parts) {
+    if (!parts.some(p => p.inlineData)) return parts;
+    const t = parts.filter(p => p.text).map(p => p.text).join('\n');
+    return [{ text: (t ? t + ' ' : '') + '[earlier attachment omitted from context]' }];
+  }
 
-    const res = await fetch(CHAT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 400, temperature: 0.7 } })
+  // Builds the turns sent to the model from saved history + the new message:
+  // skips local-only entries (error bubbles), merges consecutive same-role turns
+  // (a failed send leaves two user turns in a row), and makes sure it starts
+  // with a user turn -- Gemini is strict about alternation.
+  function buildContext(hist, userParts, dropOldInline) {
+    const turns = [];
+    const push = (role, parts) => {
+      const prev = turns[turns.length - 1];
+      if (prev && prev.role === role) prev.parts = prev.parts.concat(parts);
+      else turns.push({ role, parts: parts.slice() });
+    };
+    hist.forEach(m => {
+      if (m.local || !m.parts) return;
+      push(m.role, dropOldInline ? stripInline(m.parts) : m.parts);
     });
+    push('user', userParts);
+    while (turns.length && turns[0].role !== 'user') turns.shift();
+    return turns;
+  }
 
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody?.error || 'HTTP ' + res.status);
+  async function sendToModel(userParts, hist) {
+    const head = [
+      { role: 'user',  parts: [{ text: SYSTEM }] },
+      { role: 'model', parts: [{ text: config.modelReadyReply || `Got it! I am ${config.botName}, ready to help.` }] }
+    ];
+    const generationConfig = { maxOutputTokens: config.maxOutputTokens, temperature: 0.7 };
+    let body = JSON.stringify({ contents: head.concat(buildContext(hist, userParts, false)), generationConfig });
+    if (body.length > MAX_BODY_CHARS) {
+      // Older screenshots/PDFs are what make the request too big -- drop those first.
+      body = JSON.stringify({ contents: head.concat(buildContext(hist, userParts, true)), generationConfig });
+      if (body.length > MAX_BODY_CHARS) throw new Error('too_large');
     }
-    const data = await res.json();
-    if (!data.candidates?.length) throw new Error('no_candidates');
-    return data.candidates[0].content.parts[0].text;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    let data;
+    try {
+      const res = await fetch(CHAT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: ctrl.signal
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody?.error || 'HTTP ' + res.status);
+      }
+      data = await res.json();
+    } catch (err) {
+      if (err && err.name === 'AbortError') throw new Error('timeout');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const cand = data && data.candidates && data.candidates[0];
+    const text = ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('').trim();
+    if (!text) throw new Error('no_candidates');
+    if (cand.finishReason === 'MAX_TOKENS') {
+      return text + '\n\n(…my answer got cut off. Say "continue" and I\'ll pick up from here.)';
+    }
+    return text;
+  }
+
+  function friendlyError(m) {
+    if (m.includes('429')) return '⏳ Too many requests — wait a moment and try again!';
+    if (m === 'timeout') return '⏳ That took too long. Please try again.';
+    if (m === 'too_large') return '⚠️ Those attachments are too big to send together. Remove or crop one and try again.';
+    if (m === 'no_candidates') return "⚠️ I didn't get an answer back. Please try again.";
+    if (/failed to fetch|networkerror|load failed/i.test(m)) return "⚠️ Can't reach the server. Check your connection and try again.";
+    return '⚠️ ' + m;
   }
 
   function buildOutgoingParts(text) {
@@ -774,8 +908,19 @@
     const text = inputEl.value.trim();
     if ((!text && attachments.length === 0) || isTyping || getRemaining() <= 0 || text.length > MAX_CHARS) return;
 
+    const newInline = attachments.filter(a => a.sendable).reduce((n, a) => n + a.base64.length, 0);
+    if (newInline > MAX_NEW_ATTACH_CHARS) {
+      showInlineNotice('Attachments are too large to send together (about 2.5 MB total). Remove or crop one.');
+      return;
+    }
+
+    isTyping = true;           // set first: the thumbnail step below is async
+    sendEl.disabled = true;
+
     const outgoingAttachments = attachments;
-    const displayAtts = outgoingAttachments.map(a => ({ name: a.name, kind: a.kind, thumb: a.kind === 'image' ? a.thumb : null }));
+    const displayAtts = await Promise.all(outgoingAttachments.map(async a => ({
+      name: a.name, kind: a.kind, thumb: a.kind === 'image' ? await makeThumb(a.thumb) : null
+    })));
     const userParts = buildOutgoingParts(text);
 
     inputEl.value = '';
@@ -784,30 +929,31 @@
     inputEl.style.height = 'auto';
     attachments = [];
     renderAttachments();
-    isTyping = true;
-    sendEl.disabled = true;
 
     addMessage('user', text, displayAtts);
     const typingEl = showTyping();
-    incrementLimit();
-    updateLimitUI();
 
     try {
       const reply = await sendToModel(userParts, history);
       history.push({ role: 'user', parts: userParts, display: { text, attachments: displayAtts } });
       history.push({ role: 'model', parts: [{ text: reply }], display: { text: reply, attachments: [] } });
-      if (history.length > 40) history = history.slice(-40);
-      history = pruneOldAttachments(history);
-      saveHistory(history);
+      incrementLimit();        // only successful answers use up the daily allowance
+      updateLimitUI();
       typingEl.remove();
       addMessage('bot', reply);
     } catch (err) {
       typingEl.remove();
-      const m = String(err.message);
-      const msg = m.includes('429') ? '⏳ Too many requests — wait a moment and try again!'
-        : '⚠️ Error: ' + m;
+      const msg = friendlyError(String(err && err.message));
+      // Keep the failed exchange in the saved chat (flagged local so it's never
+      // sent to the model) so closing/reopening doesn't make it vanish.
+      history.push({ role: 'user', parts: userParts, display: { text, attachments: displayAtts } });
+      history.push({ role: 'model', local: true, parts: [{ text: msg }], display: { text: msg, attachments: [] } });
       addMessage('bot', msg);
     }
+
+    if (history.length > MAX_STORED_TURNS) history = history.slice(-MAX_STORED_TURNS);
+    history = pruneOldAttachments(history);
+    saveHistory(history);
 
     isTyping = false;
     if (getRemaining() > 0) sendEl.disabled = false;
@@ -829,6 +975,7 @@
   sendEl.addEventListener('click', handleSend);
 
   function openPanel() {
+    if (history.length && convoStartedAt && isExpired(convoStartedAt)) { history = []; clearStoredHistory(); }
     isOpen = true;
     positionPanel();
     panel.classList.add('open');
@@ -838,6 +985,13 @@
   function closePanel() { isOpen = false; panel.classList.remove('open'); }
 
   panel.querySelector('#ar-close').addEventListener('click', closePanel);
+  panel.querySelector('#ar-new').addEventListener('click', () => {
+    if (isTyping) return;
+    if (history.length && !window.confirm('Start a new chat? This clears your current conversation with ' + config.botName + '.')) return;
+    history = [];
+    clearStoredHistory();
+    renderHistory();
+  });
   document.addEventListener('click', e => {
     if (!isOpen || suppressOutsideClose) return;
     if (panel.contains(e.target)) return;

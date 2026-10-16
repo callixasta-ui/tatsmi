@@ -98,6 +98,19 @@ without one it'll just show a friendly error when someone tries to chat.
 2. In Vercel, **Settings → Environment Variables**, add `GEMINI_API_KEY`.
 3. Redeploy.
 
+**Model pool (spike protection).** Set `GEMINI_MODELS` to a comma-separated list
+(first = preferred), e.g. `gemini-3.1-flash-lite,gemini-3.5-flash`. If a model
+returns 429/5xx, times out, returns nothing, or has been retired (404), the
+server tries the next one in the same request and puts the failing model on a
+short cooldown. Each Gemini model has its own rate-limit bucket, so spreading
+across models genuinely adds headroom. Google retires model IDs regularly, so
+re-check https://ai.google.dev/gemini-api/docs/deprecations now and then.
+
+**Saved conversation.** Amy's chat is stored in the browser's `localStorage`
+(survives closing the panel, reloads and restarts) and wiped 7 days after the
+conversation started (`historyTtlDays` in `public/config.js`). The refresh icon
+in the chat header starts a new chat on demand.
+
 To customize what the bot knows or how it looks, edit `public/config.js` —
 it's the one file you need to touch. Its `systemPrompt` is already written
 to match this trainer's exact command set, so it won't invent syntax that

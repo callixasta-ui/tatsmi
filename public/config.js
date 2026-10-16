@@ -19,6 +19,8 @@ window.AI_WIDGET_CONFIG = {
   apiEndpoint: "/api/chat",
   maxChars: 1200,
   maxDailyMessages: 40,
+  maxOutputTokens: 1024,   // max length of one reply (was 400, which cut long answers off)
+  historyTtlDays: 7,       // chat is saved in this browser and wiped 7 days after it started
   maxAttachments: 10,      // max files attached to a single message
   maxFileSizeMB: 8,        // per-file size cap
   storageKey: "gds_trainer_widget",
