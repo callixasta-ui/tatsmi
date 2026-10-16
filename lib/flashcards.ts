@@ -152,7 +152,7 @@ export const FLASHCARDS: FlashcardSection[] = [
     ],
   },
   {
-    section: "TRANSACT & FIX MISTAKES",
+    section: "REVIEW & SAVE",
     cards: [
       {
         code: "RT",
@@ -164,18 +164,8 @@ export const FLASHCARDS: FlashcardSection[] = [
         ],
       },
       {
-        code: "XE",
-        meaning: "Cancel a numbered element, a range, or several selected elements",
-        whenToUse: "To remove a mistake -- look up the number(s) from RT first",
-        fullCommand: "XE3-6",
-        dissection: [
-          { part: "XE", desc: "entry code -- Cancel Element" },
-          { part: "3-6", desc: "a range of element numbers (or use 3,6 for just those two)" },
-        ],
-      },
-      {
         code: "ER",
-        meaning: "End transaction -- saves the PNR",
+        meaning: "End transaction -- saves the PNR and keeps it on screen",
         whenToUse: "Once all 5 mandatory elements are on file: name, segment, contact, ticketing, RF",
         fullCommand: "ER",
         dissection: [
@@ -183,22 +173,12 @@ export const FLASHCARDS: FlashcardSection[] = [
         ],
       },
       {
-        code: "RT (retrieve)",
-        meaning: "Retrieve a saved PNR by record locator or family name",
-        whenToUse: "To pull up a booking that was already saved with ER, on a later visit",
-        fullCommand: "RT7F3K2Q",
+        code: "ET",
+        meaning: "End transaction -- saves the PNR and clears the screen",
+        whenToUse: "Same 5 mandatory elements as ER, but use it when you are done and want to start the next booking",
+        fullCommand: "ET",
         dissection: [
-          { part: "RT", desc: "entry code -- Retrieve" },
-          { part: "7F3K2Q", desc: "6-character record locator, no punctuation (or use RT/SURNAME to search by name)" },
-        ],
-      },
-      {
-        code: "IG",
-        meaning: "Ignore -- discards a brand-new PNR, or reverts an already-saved one to its last save",
-        whenToUse: "New booking you don't want to keep: discards it. Editing a saved PNR and want to undo the session's changes: reverts to what ER last saved, instead of wiping it",
-        fullCommand: "IG",
-        dissection: [
-          { part: "IG", desc: "entry code, no parameters -- discard (new PNR) or revert (saved PNR)" },
+          { part: "ET", desc: "entry code, no parameters -- saves the PNR, then clears the screen" },
         ],
       },
     ],
@@ -263,29 +243,8 @@ export const FLASHCARDS: FlashcardSection[] = [
     ],
   },
   {
-    section: "REFERENCE & TRAINER-ONLY",
+    section: "HELP",
     cards: [
-      {
-        code: "DAC",
-        meaning: "Decode a city/airport code into its name",
-        whenToUse: "When you know the 3-letter code and need the full city name",
-        fullCommand: "DACLON",
-        dissection: [
-          { part: "DAC", desc: "entry code -- Decode City" },
-          { part: "LON", desc: "3-letter city/airport code to look up" },
-        ],
-      },
-      {
-        code: "DAN",
-        meaning: "Encode a city name into its code",
-        whenToUse: "The reverse of DAC -- when you know the name and need the 3-letter code",
-        fullCommand: "DAN BANGKOK",
-        dissection: [
-          { part: "DAN", desc: "entry code -- Decode/Encode by Name" },
-          { part: "(space)", desc: "separates the code from the search text" },
-          { part: "BANGKOK", desc: "city name (or part of it) to search for" },
-        ],
-      },
       {
         code: "HE",
         meaning: "Help -- lists commands, or explains one",

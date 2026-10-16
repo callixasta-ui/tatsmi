@@ -1,7 +1,7 @@
 # GDS Command Trainer
 
 A browser-based simulator of real Amadeus-style "cryptic" GDS commands
-(AN, SS, NM, AP-family, TKOK/TKTL, RF, RT, XE, DAC/DAN, etc.)
+(AN, SS, NM, AP-family, TKOK/TKTL, RF, RT, ER/ET)
 for learning the actual syntax of building a PNR, from availability and
 selling through to the ticketing arrangement (TKOK/TKTL). Not connected to any real airline
 inventory or GDS — availability is deterministic/fake, but the entries and
@@ -10,18 +10,15 @@ can.
 
 - **CLI panel** (top/left): type commands, see terminal-style output. Scrollable.
 - **Lower/right panel**, three tabs:
-  - **Practice Tasks** — 10 guided exercises, from single commands up to a full
+  - **Practice Tasks** — 8 guided exercises, from single commands up to a full
     real-world work order, with self-checking steps and hidden hints.
   - **Command List** — quick reference for every entry the engine understands.
   - **Database** — a dashboard of every PNR you've saved with `ER`/`ET`: record
-    locator, passengers, route, ticketing status. Retrieve or delete straight
-    from the list.
+    locator, passengers, route, ticketing status. Delete straight from the list.
   - **Global Chat** — a public room shared by everyone using the trainer.
     First visit asks for a one-time username; messages are stored in Neon
     Postgres so everybody sees the same conversation.
-- **Work areas A–F** (chips in the CLI header, or `JA`…`JF` / `JO`): each area
-  holds its own booking in progress, like a real Amadeus terminal. `ET` saves a
-  PNR and clears the area; `ER` saves but leaves it open; `IG` discards.
+- `ET` saves a PNR and clears the screen; `ER` saves but leaves it open.
 - A **chat helper** ("GDS Study Buddy") in the bottom-right corner, tailored
   to this trainer's exact command set, for when you're stuck.
 
@@ -47,7 +44,6 @@ exactly which of the five you're missing. A few syntax details that are
 easy to get wrong and are modeled faithfully here:
 
 - Mobile and email use a hyphenated, lowercase format ending in the passenger number: `apm-09123456789/P1`, `ape-exazakana@gmail.com/P1`. `/P<n>` is the passenger the contact belongs to (`P1` first passenger, `P2` second, ...), so the passenger must already be in the PNR. Plain phone is `AP`, home is `APH`.
-- Retrieving a saved PNR is `RT<LOCATOR>` — no punctuation, no asterisk.
 - `TKTL` takes a real date **and time**: `TKTL20JAN/1700`, not just a date.
 - Selling into a class showing 0 seats doesn't fail — it waitlists (`HL`
   instead of `HK`), same as a real system. A fully closed class (`C`) does

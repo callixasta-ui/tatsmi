@@ -1094,17 +1094,9 @@ function helpTopic(topic: string): string[] {
     SI: "SIARNK -- Arrival Unknown segment: an information-only segment that keeps itinerary continuity when the passenger changes transport mode mid-trip.",
     SO: "SO<CX><CLASS>[<ddMMM>]<ORIG><DEST> -- Open Flight Segment: no confirmed flight/date yet, keeps segment continuity for pricing/ticketing. A fictitious date is recommended. e.g. SOAFC8AUGCDGMNL, or without a date: SOAFCCDGMNL",
     RTSVC: "RTSVC -- flight service information for the last segment sold (shown after a waitlisted SS).",
-    RT: "RT -- redisplay the active PNR. RT<LOCATOR> -- retrieve a saved PNR by record locator. RT/<SURNAME> -- retrieve by family name.",
+    RT: "RT -- redisplay the active PNR with every element numbered.",
     ER: "ER -- End & Retrieve: saves the PNR, hands back a record locator, and leaves the PNR open on screen. Requires the 5 mandatory elements.",
-    ET: "ET -- End Transaction: saves the PNR (same 5 mandatory elements as ER) and clears the work area so you can start the next booking straight away.",
-    IG: "IG -- during creation (PNR never saved), discards everything. On an already-saved PNR you're modifying, ignores your changes and reverts to the last-saved form instead.",
-    JA: "JA..JF -- jump to work area A-F. Each area holds its own PNR in progress, so you can work several bookings side by side. JO shows what's in each area.",
-    JO: "JO -- work area status: which of areas A-F are empty, in progress, or holding a saved PNR.",
-    XE: "XE<n> -- cancel element number n. XE<a>-<b> -- cancel a range. XE<a>,<b> -- cancel selected elements. Numbering comes from RT.",
-    DAC: "DAC<code> -- decode a city or airport code to its name. On a multi-airport metro code (LON, NYC, PAR, TYO, CHI, WAS, MIL, MOW, OSA, SEL, SAO, RIO, BUE, ROM, STO) also lists the airports under it, e.g. DACLON, DACLHR.",
-    DAN: "DAN <text> -- encode a city/country name to its code(s). Returns every match (exact, then starts-with, then contains), same as the real system when a name is ambiguous, e.g. DAN LONDON, DAN SAN.",
-    DNA: "DNA<code> -- decode an airline code to its name. Accepts either the 2-character IATA code (e.g. DNAEK, DNA5J) or the 3-letter ICAO code (e.g. DNAUAE, DNACEB) -- both resolve to the same airline, just like the real system. DNA <text> -- the reverse: encode an airline name to its code(s), e.g. DNA EMIRATES -> EK/UAE. Bidirectional, same pairing style as DAC/DAN but for carriers.",
-    CLS: "CLS -- clear the screen. Trainer convenience, not a real Amadeus entry.",
+    ET: "ET -- End Transaction: saves the PNR (same 5 mandatory elements as ER) and clears the screen so you can start the next booking.",
   };
   return t[topic] ? [t[topic]] : [`NO HELP AVAILABLE FOR "${topic}" -- TYPE HE FOR THE FULL LIST`];
 }
@@ -1190,16 +1182,9 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "ape-<email>/P<n>             EMAIL CONTACT FOR PASSENGER n (e.g. ape-exazakana@gmail.com/P1)",
       "TKOK | TKTL<ddMMM>/<hhmm>     TICKETING ARRANGEMENT",
       "RF <NAME>                     RECEIVED FROM (mandatory before ER)",
-      "XE<n> / XE<a>-<b> / XE<a>,<b> CANCEL ELEMENT n / A RANGE / SELECTED ELEMENTS",
-      "RT                            DISPLAY ACTIVE PNR",
-      "RT<LOCATOR> / RT/<SURNAME>    RETRIEVE A SAVED PNR (BY LOCATOR OR FAMILY NAME)",
+      "RT                            DISPLAY THE ACTIVE PNR",
       "ER                            END TRANSACTION & REDISPLAY -- SAVE, PNR STAYS OPEN",
-      "ET                            END TRANSACTION -- SAVE, THEN CLEAR THE AREA",
-      "IG                            IGNORE -- DISCARD IF NEW, OR REVERT TO LAST SAVE IF MODIFYING",
-      "JA..JF / JO                   JUMP TO WORK AREA A-F / SHOW AREA STATUS",
-      "DAC<CODE> / DAN <TEXT>        DECODE / ENCODE A CITY",
-      "DNA<CODE> / DNA <TEXT>        DECODE / ENCODE AN AIRLINE - IATA OR ICAO CODE (BIDIRECTIONAL)",
-      "CLS                           CLEAR SCREEN (trainer convenience only)",
+      "ET                            END TRANSACTION -- SAVE, THEN CLEAR THE SCREEN",
       "HE <TOPIC>                    HELP ON ONE ENTRY, e.g. HE TKTL",
       "--------------------------------------------------"
     );
@@ -1742,102 +1727,16 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
-  // XE<n> - cancel a single element | XE<a>-<b> - cancel a range |
-  // XE<a>,<b>,... - cancel selected elements (handout's "Canceling PNR
-  // Elements" table: XE4 / XE3-6 / XE5,7).
-  const xeMatch = cmd.match(/^XE([\d,-]+)$/);
-  if (xeMatch) {
-    const spec = xeMatch[1];
-    const indices = new Set<number>();
-    let badToken: string | null = null;
-    spec.split(",").forEach((tok) => {
-      if (badToken) return;
-      const rangeM = tok.match(/^(\d+)-(\d+)$/);
-      if (rangeM) {
-        const a = parseInt(rangeM[1], 10);
-        const b = parseInt(rangeM[2], 10);
-        if (a > b) { badToken = tok; return; }
-        for (let i = a; i <= b; i++) indices.add(i);
-      } else if (/^\d+$/.test(tok)) {
-        indices.add(parseInt(tok, 10));
-      } else {
-        badToken = tok;
-      }
-    });
-    if (badToken) {
-      out.push(`FORMAT INVALID - "${badToken}" - USE XE<n>, XE<a>-<b> (RANGE), OR XE<a>,<b> (SELECTED)`);
-      return { lines: out, state: s };
-    }
-    // Cancel highest index first so lower indices stay valid as the
-    // element list is renumbered after each removal.
-    const sorted = [...indices].sort((a, b) => b - a);
-    const cancelled: number[] = [];
-    const missing: number[] = [];
-    sorted.forEach((idx) => {
-      if (removeElement(s.activePNR, idx)) cancelled.push(idx);
-      else missing.push(idx);
-    });
-    if (cancelled.length > 0) out.push(`ELEMENT(S) ${cancelled.sort((a, b) => a - b).join(",")} CANCELLED`);
-    if (missing.length > 0) out.push(`NO ELEMENT NUMBER ${missing.sort((a, b) => a - b).join(",")} TO CANCEL`);
-    return { lines: out, state: s };
-  }
-
   // RT - redisplay active PNR
   if (cmd === "RT") {
     out.push(...renderPNR(s.activePNR));
     return { lines: out, state: s };
   }
 
-  // RT<LOCATOR> - retrieve saved (no separator -- real Amadeus syntax)
-  const rtLoc = cmd.match(/^RT([A-Z0-9]{6})$/);
-  if (rtLoc) {
-    const loc = rtLoc[1];
-    const found = s.savedPNRs[loc];
-    if (!found) {
-      out.push(`NOT FOUND - RECORD LOCATOR ${loc}`);
-      return { lines: out, state: s };
-    }
-    // Real systems won't let a retrieve silently wipe a booking you're still
-    // building. Unsaved work in this area must be ended (ER/ET) or ignored (IG)
-    // first -- or just keep it and retrieve in another area (JB, JC...).
-    if (pnrHasContent(s.activePNR) && !s.activePNR.locator) {
-      out.push("ENTRY NOT VALID - THIS AREA HAS AN UNSAVED PNR IN PROGRESS");
-      out.push("  ER/ET TO SAVE IT, IG TO DISCARD IT, OR JUMP TO A FREE AREA (E.G. JB)");
-      return { lines: out, state: s };
-    }
-    s.activePNR = found;
-    out.push(...renderPNR(found));
-    return { lines: out, state: s };
-  }
-
-  // RT/<SURNAME> - retrieve saved PNR(s) by family name
-  const rtName = cmd.match(/^RT\/([A-Z]+)$/);
-  if (rtName) {
-    const surname = rtName[1];
-    const matches = Object.values(s.savedPNRs).filter((p) => p.names.some((n) => n.last === surname));
-    if (matches.length === 0) {
-      out.push(`NOT FOUND - NO SAVED PNR WITH FAMILY NAME ${surname}`);
-      return { lines: out, state: s };
-    }
-    if (matches.length > 1) {
-      out.push(`${matches.length} PNR(S) FOUND WITH FAMILY NAME ${surname} - RETRIEVE BY LOCATOR INSTEAD:`);
-      matches.forEach((p) => out.push(`  ${p.locator}`));
-      return { lines: out, state: s };
-    }
-    const found = matches[0];
-    if (pnrHasContent(s.activePNR) && !s.activePNR.locator) {
-      out.push("ENTRY NOT VALID - THIS AREA HAS AN UNSAVED PNR IN PROGRESS");
-      out.push("  ER/ET TO SAVE IT, IG TO DISCARD IT, OR JUMP TO A FREE AREA (E.G. JB)");
-      return { lines: out, state: s };
-    }
-    s.activePNR = found;
-    out.push(...renderPNR(found));
-    return { lines: out, state: s };
-  }
   //   ER = end transaction AND REDISPLAY: PNR saved, stays on screen so you can
   //        keep working on it.
   //   ET = end transaction: PNR saved and the area is wiped, ready for the next
-  //        booking. No IG needed.
+  //        booking. 
   if (cmd === "ER" || cmd === "ET") {
     const missing: string[] = [];
     if (s.activePNR.names.length === 0) missing.push("NAME (NM)");
@@ -1855,177 +1754,11 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     s.savedPNRs[locator] = s.activePNR;
     out.push(`END OF TRANSACTION COMPLETE - ${locator}`);
     if (cmd === "ET") {
-      out.push(`PNR ${locator} SAVED. AREA ${s.area} IS CLEAR FOR A NEW BOOKING.`);
+      out.push(`PNR ${locator} SAVED. THE SCREEN IS CLEAR FOR A NEW BOOKING.`);
       s.activePNR = emptyPNR();
     } else {
       out.push(...renderPNR(s.activePNR));
-      out.push(`(PNR STILL OPEN IN AREA ${s.area} - ET WHEN DONE, OR IG TO CLEAR THE AREA)`);
-    }
-    return { lines: out, state: s };
-  }
-
-  // IG - ignore. During creation (never saved -- no locator yet), all
-  // elements are discarded. When modifying an existing (already-saved) PNR,
-  // IG instead ignores the updates and returns the PNR to its original,
-  // last-saved form -- per the handout's IGNORE TRANSACTION section.
-  if (cmd === "IG") {
-    if (s.activePNR.locator && s.savedPNRs[s.activePNR.locator]) {
-      const original = s.savedPNRs[s.activePNR.locator];
-      s.activePNR = original;
-      out.push(`IGNORED - ${original.locator}`);
-      out.push(...renderPNR(original));
-    } else {
-      s.activePNR = emptyPNR();
-      out.push(`IGNORED - AREA ${s.area} CLEARED`);
-    }
-    return { lines: out, state: s };
-  }
-
-  // JA..JF - jump to another work area. Each keeps its own PNR in progress.
-  const jMatch = cmd.match(/^J([A-F])$/);
-  if (jMatch) {
-    const target = jMatch[1];
-    if (target === s.area) {
-      out.push(`ALREADY IN AREA ${target}`);
-      return { lines: out, state: s };
-    }
-    s.parked[s.area] = {
-      lastAvailability: s.lastAvailability,
-      lastQuery: s.lastQuery,
-      previousQuery: s.previousQuery,
-      activePNR: s.activePNR,
-    };
-    const next = s.parked[target];
-    delete s.parked[target];
-    s.area = target;
-    s.lastAvailability = next?.lastAvailability ?? [];
-    s.lastQuery = next?.lastQuery;
-    s.previousQuery = next?.previousQuery;
-    s.activePNR = next?.activePNR ?? emptyPNR();
-    out.push(`AREA ${target} ACTIVE`);
-    if (pnrHasContent(s.activePNR)) out.push(...renderPNR(s.activePNR));
-    else out.push(" (EMPTY AREA - READY FOR A NEW BOOKING)");
-    return { lines: out, state: s };
-  }
-
-  // JO - work area status
-  if (cmd === "JO") {
-    out.push("WORK AREAS ---------------------------------");
-    WORK_AREAS.forEach((a) => {
-      const pnr = a === s.area ? s.activePNR : s.parked[a]?.activePNR;
-      const mark = a === s.area ? "*" : " ";
-      if (!pnr || !pnrHasContent(pnr)) {
-        out.push(` ${a}${mark} ${a === s.area ? "ACTIVE  " : "        "} EMPTY`);
-      } else {
-        const n = getElements(pnr).length;
-        const st = pnr.locator ? `RLOC ${pnr.locator}` : "UNSAVED";
-        out.push(` ${a}${mark} ${a === s.area ? "ACTIVE  " : "        "} ${n} ELEMENT(S) - ${st}`);
-      }
-    });
-    return { lines: out, state: s };
-  }
-
-  // DAC -- decode a city OR airport code. Real Amadeus: an airport code
-  // decodes to "CITY NAME/AIRPORT NAME, COUNTRY"; a metro/city code that
-  // covers several airports also lists them, since that's the whole point
-  // of DAC'ing a city code before you AN it.
-  const dacMatch = cmd.match(/^DAC([A-Z]{3})$/);
-  if (dacMatch) {
-    const code = dacMatch[1];
-    const loc = locationOf(code);
-    if (!loc) {
-      out.push(`${code} UNKNOWN CODE (NOT IN THIS TRAINER'S GEOGRAPHY TABLE)`);
-    } else if (loc.type === "AIRPORT") {
-      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}  (AIRPORT - CITY CODE ${loc.cityCode})`);
-    } else if (CITY_AIRPORTS[code]) {
-      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}  (METROPOLITAN AREA)`);
-      out.push(` AIRPORTS SERVING ${code}: ${CITY_AIRPORTS[code].join(", ")}`);
-    } else {
-      out.push(`${code} ${loc.name}, ${loc.country}.${loc.countryCode}`);
-    }
-    return { lines: out, state: s };
-  }
-
-  // DAN -- encode a name to its code(s). Real Amadeus returns every
-  // plausible match, ranked (exact match first, then "starts with", then
-  // "contains"), not just the first hit -- a name like SAN or SANTIAGO is
-  // genuinely ambiguous and the terminal shows you the candidate list.
-  const danMatch = raw.match(/^DAN\s+(.+)$/i);
-  if (danMatch) {
-    const needle = danMatch[1].trim().toUpperCase();
-    const all = Object.values(LOCATIONS);
-    const rank = (loc: LocationEntry): number => {
-      if (loc.name === needle) return 0;
-      if (loc.name.startsWith(needle)) return 1;
-      if (loc.name.includes(needle)) return 2;
-      if (loc.country.startsWith(needle)) return 3;
-      if (loc.country.includes(needle)) return 4;
-      return -1;
-    };
-    const matches = all
-      .map((loc) => ({ loc, r: rank(loc) }))
-      .filter((x) => x.r >= 0)
-      .sort((a, b) => a.r - b.r || a.loc.code.localeCompare(b.loc.code))
-      .slice(0, 15);
-    if (matches.length === 0) {
-      out.push(`${needle} NO MATCH (NOT IN THIS TRAINER'S GEOGRAPHY TABLE)`);
-    } else if (matches.length === 1) {
-      const { loc } = matches[0];
-      const tag = loc.type === "AIRPORT" ? ` (AIRPORT, CITY ${loc.cityCode})` : "";
-      out.push(`${needle} ${loc.code} ${loc.name}, ${loc.country}${tag}`);
-    } else {
-      out.push(`${needle} -- MULTIPLE MATCHES:`);
-      matches.forEach(({ loc }) => {
-        const tag = loc.type === "AIRPORT" ? ` (AIRPORT, CITY ${loc.cityCode})` : "";
-        out.push(` ${loc.code}  ${loc.name}, ${loc.country}${tag}`);
-      });
-    }
-    return { lines: out, state: s };
-  }
-
-  // DNA -- decode/encode airline (bidirectional), same pairing as DAC/DAN
-  // but for carriers instead of cities. DNA<CODE> (no space) decodes a
-  // code to its name -- CODE can be the 2-character IATA code used in
-  // flight numbers and PNRs (e.g. "5J"), OR the 3-letter ICAO code used
-  // in ops/ATC contexts (e.g. "CEB") -- both resolve to the same airline,
-  // matching how the real system accepts either. DNA <TEXT> (with a
-  // space) encodes a name back to its code(s).
-  const dnaCodeMatch = cmd.match(/^DNA([A-Z0-9]{2,3})$/);
-  if (dnaCodeMatch) {
-    const code = dnaCodeMatch[1];
-    const rec = AIRLINES_BY_IATA[code] ?? AIRLINES_BY_ICAO[code];
-    if (!rec) {
-      out.push(`${code} UNKNOWN AIRLINE CODE (NOT IN THIS TRAINER'S AIRLINE TABLE)`);
-    } else {
-      const pair = airlineCodePair(rec);
-      out.push(rec.numeric ? `${pair}  ${rec.numeric}  ${rec.name}` : `${pair}  ${rec.name}`);
-    }
-    return { lines: out, state: s };
-  }
-
-  const dnaNameMatch = raw.match(/^DNA\s+(.+)$/i);
-  if (dnaNameMatch) {
-    const needle = dnaNameMatch[1].trim().toUpperCase();
-    const rank = (name: string): number => {
-      if (name === needle) return 0;
-      if (name.startsWith(needle)) return 1;
-      if (name.includes(needle)) return 2;
-      return -1;
-    };
-    const matches = AIRLINE_RECORDS
-      .map((rec) => ({ rec, r: rank(rec.name) }))
-      .filter((x) => x.r >= 0)
-      .sort((a, b) => a.r - b.r || a.rec.iata.localeCompare(b.rec.iata))
-      .slice(0, 15);
-    if (matches.length === 0) {
-      out.push(`${needle} NO MATCH (NOT IN THIS TRAINER'S AIRLINE TABLE)`);
-    } else if (matches.length === 1) {
-      const { rec } = matches[0];
-      const pair = airlineCodePair(rec);
-      out.push(rec.numeric ? `${needle} ${pair}  ${rec.numeric}  ${rec.name}` : `${needle} ${pair}  ${rec.name}`);
-    } else {
-      out.push(`${needle} -- MULTIPLE MATCHES:`);
-      matches.forEach(({ rec }) => out.push(` ${airlineCodePair(rec)}  ${rec.name}`));
+      out.push("(PNR STILL OPEN ON SCREEN - ET WHEN DONE TO CLEAR IT)");
     }
     return { lines: out, state: s };
   }

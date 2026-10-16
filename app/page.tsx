@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { processCommand, newState, normalizeState, pnrHasContent, WORK_AREAS, EngineState, PNR } from "@/lib/commands";
+import { processCommand, newState, normalizeState, EngineState, PNR } from "@/lib/commands";
 import { PRACTICE_TASKS, PracticeStep } from "@/lib/practice";
 import { FLASHCARDS } from "@/lib/flashcards";
 import { QUIZ_LEVELS } from "@/lib/quiz";
@@ -73,31 +73,16 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
     ],
   },
   {
-    section: "TRANSACT & FIX MISTAKES",
+    section: "REVIEW & SAVE",
     rows: [
       { cmd: "RT", desc: "Redisplay the active (in-progress) PNR, elements numbered" },
-      { cmd: "XE3", desc: "Cancel element number 3 (from the RT numbering)" },
       { cmd: "ER", desc: "End & redisplay -- saves the PNR, gives a record locator, PNR stays open on screen" },
-      { cmd: "ET", desc: "End transaction -- saves the PNR, then clears the area for the next booking" },
-      { cmd: "RT7F3K2Q", desc: "Retrieve a saved PNR by locator (no punctuation)" },
-      { cmd: "IG", desc: "Discard the active PNR without saving" },
+      { cmd: "ET", desc: "End transaction -- saves the PNR, then clears the screen for the next booking" },
     ],
   },
   {
-    section: "WORK AREAS (SEVERAL BOOKINGS AT ONCE)",
-    rows: [
-      { cmd: "JB", desc: "Jump to work area B (JA-JF). Each area keeps its own PNR in progress" },
-      { cmd: "JO", desc: "Show which areas are empty, in progress, or holding a saved PNR" },
-    ],
-  },
-  {
-    section: "REFERENCE & TRAINER-ONLY",
-    rows: [
-      { cmd: "DACLON / DAN BANGKOK", desc: "Decode a city code / encode a city name" },
-      { cmd: "DNAEK / DNACEB / DNA EMIRATES", desc: "Decode an airline by IATA (EK) or ICAO (CEB) code / encode a name to its code (bidirectional)" },
-      { cmd: "HE / HE TKTL", desc: "Help list, or help on one entry" },
-      { cmd: "CLS", desc: "Clear the screen (trainer convenience, not real Amadeus)" },
-    ],
+    section: "HELP",
+    rows: [{ cmd: "HE / HE TKTL", desc: "Help list, or help on one entry" }],
   },
 ];
 
@@ -310,12 +295,6 @@ export default function Page() {
     downloadCanvasPng(canvas, `gds-trainer-level${level.order}-badge.png`);
   }
 
-  function retrieveFromDashboard(locator: string) {
-    setTab("commands");
-    runCommand(`RT${locator}`);
-    inputRef.current?.focus();
-  }
-
   function deleteFromDashboard(locator: string) {
     if (!window.confirm(`Remove saved PNR ${locator}? This only removes it from the Database view -- it's a dashboard action, not a real Amadeus entry.`)) {
       return;
@@ -354,26 +333,7 @@ export default function Page() {
           <div className="panel-header cli-header">
             <span>CLI</span>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <div className="area-chips" title="Work areas: each holds its own booking in progress. Green = has a PNR.">
-                <span className="area-chips-label">AREA</span>
-                {WORK_AREAS.map((a) => {
-                  const pnr = a === engine.area ? engine.activePNR : engine.parked?.[a]?.activePNR;
-                  const used = !!pnr && pnrHasContent(pnr);
-                  const cls = "area-chip" + (a === engine.area ? " on" : used ? " used" : "");
-                  return (
-                    <button
-                      key={a}
-                      type="button"
-                      className={cls}
-                      onClick={() => a !== engine.area && runCommand(`J${a}`)}
-                      title={a === engine.area ? `Area ${a} (current)` : `Jump to area ${a} (J${a})`}
-                    >
-                      {a}
-                    </button>
-                  );
-                })}
-              </div>
-              <button className="clear-btn" onClick={clearScreen} title="Clear screen (CLS) -- keeps your PNR and progress">
+              <button className="clear-btn" onClick={clearScreen} title="Clear the screen -- keeps your PNR and progress">
                 Clear screen
               </button>
             </div>
@@ -654,8 +614,8 @@ export default function Page() {
             {tab === "practice" && (
               <>
                 <div className="practice-intro">
-                  Work through these roughly in order -- 1&ndash;6 build up the individual commands, 7&ndash;9 are one
-                  real work order end to end, and 10 shows how to juggle several bookings with work areas. Each step checks itself off once you type it correctly. Stuck? Tap
+                  Work through these roughly in order -- 1&ndash;4 build up the individual commands, 5&ndash;7 are one
+                  real work order end to end, and 8 covers family names, an infant and a broken itinerary. Each step checks itself off once you type it correctly. Stuck? Tap
                   "Show hint" for the exact command.
                 </div>
                 {PRACTICE_TASKS.map((task) => {
@@ -714,7 +674,6 @@ export default function Page() {
                     <div className="db-row db-dim">{pnrRoute(pnr)}</div>
                     <div className="db-row db-dim">{pnr.ticketing ?? "no ticketing arrangement"} &middot; RF {pnr.receivedFrom ?? "--"}</div>
                     <div className="db-actions">
-                      <button className="hint-btn" onClick={() => retrieveFromDashboard(pnr.locator!)}>View / Retrieve</button>
                       <button className="hint-btn db-delete" onClick={() => deleteFromDashboard(pnr.locator!)}>Delete</button>
                     </div>
                   </div>
