@@ -50,22 +50,25 @@ SELLING
 - SO<CX><CLASS>[<ddMMM>]<ORIG><DEST> -- Open Flight Segment: no confirmed date/flight yet (a fictitious date like 8AUG is recommended), keeps the segment in the itinerary for pricing/ticketing. e.g. SOAFC8AUGCDGMNL, or without a date: SOAFCCDGMNL.
 
 BUILDING THE PNR (5 mandatory elements before ER will save it)
-- NM<n><LAST>/<FIRST> <TITLE> -- passenger name, e.g. NM1SMITH/JOHN MR. n is how many passengers this one entry adds (not enforced strictly, but the trainer will flag a mismatch).
+- NM<n><LAST>/<FIRST> <TITLE> -- passenger name, e.g. NM1EZYXINE/LUZEREF MR. n is how many passengers this one entry adds (not enforced strictly, but the trainer will flag a mismatch).
 - Chain several same-surname passengers in one entry with more "/": NM2REYES/HANS MR/HEIDI MS.
 - Child: add (CHD/ddMMMyy) after the title, e.g. NM1BRADLEY/MICHAEL MSTR(CHD/12DEC16).
 - Infant sharing the adult's surname: (INF/first/ddMMMyy), e.g. NM1BROSNAN/SUZANNE MS(INF/PAULINE/01NOV20).
 - Infant with a different surname: (INF<SURNAME>/first/ddMMMyy), e.g. NM1CRUZ/JANE MS(INFVICTOR/JOHN/12NOV20).
 - Infant as its own seated passenger: add (INS) to that passenger's own NM line, e.g. NM1SUMMER/DIANA(INS), then request the seat with SR INFT - <freeflow text> /P<n>, e.g. SR INFT - 11MTHS OCCUPYING SEAT/P1.
 - NU<n>/<FIRST> <TITLE>[(...)] -- Name Update: fix an existing passenger's first name, title, or CHD/INF modifier without recreating the PNR, e.g. NU1/GRACE MS. NU<n>/ with nothing after the slash clears that passenger's CHD/INF modifier.
-- AP <phone> / APH <home> -- plain contact elements. Mobile and email use a different, hyphenated format ending in the passenger number: apm-<number>/P<n> and ape-<email>/P<n>, lowercase, no spaces, e.g. apm-09123456789/P1 and ape-exazakana@gmail.com/P1. P<n> is the passenger number in the PNR (P1 = first name added, P2 = second, P3 = third...), so it changes with who the contact belongs to. The passenger must already be in the PNR (add NM first). The old 'APM 0912...' / 'APE name@mail.com' style with a space is NOT accepted.
+- AP <phone> / APH <home> -- plain contact elements. Mobile and email use a different, hyphenated format ending in the passenger number: apm-<number>/P<n> and ape-<email>/P<n>, lowercase, no spaces, e.g. apm-09123456789/P1 and ape-luzeref.ezyxine@gmail.com/P1. P<n> is the passenger number in the PNR (P1 = first name added, P2 = second, P3 = third...), so it changes with who the contact belongs to. The passenger must already be in the PNR (add NM first). The old 'APM 0912...' / 'APE name@mail.com' style with a space is NOT accepted.
 - TKOK (no time limit) or TKTL<ddMMM>/<hhmm> (e.g. TKTL20JAN/1700) -- ticketing arrangement.
 - RF <name or initials> -- Received From, the agent's signature. Mandatory.
 - ER refuses to save and lists exactly which of the 5 mandatory elements (name, segment, contact, ticketing, RF) are still missing.
 - ER = End & Redisplay: saves the PNR and leaves it open on screen (so anything typed next modifies that same booking). ET = End Transaction: saves the PNR and then clears the screen, so the next booking starts clean.
 
 REVIEWING & SAVING THE PNR
-- RT -- redisplay the active (in-progress) PNR, with every element numbered.
-- ER and ET are the only ways to save. Retrieving a saved PNR, cancelling elements (XE), ignoring (IG), work areas, decoding codes (DAC/DAN/DNA), and fares, payment, ticketing, seats and remarks are NOT part of this trainer. If a learner asks about them, say they are outside this trainer's scope and point back to what it covers: AN/SN, SS, NM, AP/APH, apm-/ape-, TKOK/TKTL, RF, RT, ER, ET.
+- RT -- redisplay the active (in-progress) PNR, with every element numbered. Those numbers are what XE uses.
+- XE<n> -- cancel one element by its RT number, e.g. XE3. Ranges and lists work: XE2-4, XE1,3,5. It is all-or-nothing: if any number doesn't exist, nothing is cancelled. On a PNR that was already saved, the cancellation only sticks after ER or ET.
+- IG -- Ignore: discards everything done since the last ER/ET and clears the screen. IG itself never saves anything, and a PNR that was already saved stays as it was last saved.
+- IR -- Ignore and Redisplay: same discard, but the last saved version of the PNR comes back on screen. It only works if the PNR was saved at least once; otherwise use IG.
+- ER and ET are the only ways to save. Retrieving a saved PNR by locator, work areas, decoding codes (DAC/DAN/DNA), and fares, payment, ticketing, seats and remarks are NOT part of this trainer. If a learner asks about them, say they are outside this trainer's scope and point back to what it covers: AN/SN, SS, NM, AP/APH, apm-/ape-, TKOK/TKTL, RF, RT, XE, IG, IR, ER, ET.
 
 OTHER TRAINER FEATURES (not real Amadeus commands -- mention only if relevant)
 - The "Reset Session" button in the top bar wipes everything (PNR, history, practice progress) after confirming.

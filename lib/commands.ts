@@ -1084,9 +1084,9 @@ function helpTopic(topic: string): string[] {
     NM: "NM<n><LAST>/<FIRST> <TITLE> -- add a passenger name (n = how many names in this entry). Chain more with '/': NM2REYES/HANS MR/HEIDI MS. Child: NM1BRADLEY/MICHAEL MSTR(CHD/12DEC16). Infant, same surname: NM1BROSNAN/SUZANNE MS(INF/PAULINE/01NOV20). Infant, different surname: NM1CRUZ/JANE MS(INFVICTOR/JOHN/12NOV20). Infant as its own seated passenger: NM1SUMMER/DIANA(INS), then SR INFT.",
     NU: "NU<n>/<FIRST> <TITLE>[(CHD/ddMMMyy)|(INF/first/ddMMMyy)] -- Name Update: change passenger n's first name/title or CHD/INF modifier without recreating the PNR. NU<n>/ (nothing after the slash) removes the CHD/INF modifier. e.g. NU1/GRACE MS",
     SR: "SR INFT - <freeflow text> /P<n> -- request a seat for an infant registered as its own (INS) passenger, associated with adult/passenger n. e.g. SR INFT - 11MTHS OCCUPYING SEAT/P1",
-    AP: "AP <phone> | APH <home> -- contact elements. Mobile and email use the hyphen format with a passenger number: apm-<number>/P<n> and ape-<email>/P<n>, e.g. apm-09123456789/P1, ape-exazakana@gmail.com/P2. P<n> is the passenger the contact belongs to (P1 = first passenger, P2 = second...).",
+    AP: "AP <phone> | APH <home> -- contact elements. Mobile and email use the hyphen format with a passenger number: apm-<number>/P<n> and ape-<email>/P<n>, e.g. apm-09123456789/P1, ape-luzeref.ezyxine@gmail.com/P2. P<n> is the passenger the contact belongs to (P1 = first passenger, P2 = second...).",
     APM: "apm-<number>/P<n> -- mobile contact for passenger n. e.g. apm-09123456789/P1",
-    APE: "ape-<email>/P<n> -- email contact for passenger n. e.g. ape-exazakana@gmail.com/P1",
+    APE: "ape-<email>/P<n> -- email contact for passenger n. e.g. ape-luzeref.ezyxine@gmail.com/P1",
     TKOK: "TKOK -- ticketing arrangement with no time limit.",
     TKTL: "TKTL<ddMMM>/<hhmm> -- ticketing time limit: the date and 24-hour time to ticket by. e.g. TKTL20JAN/1700 = 20 January, 5:00 PM.",
     TK: "TKOK -- no time limit. TKTL<ddMMM>/<hhmm> -- ticketing time limit.",
@@ -1094,7 +1094,10 @@ function helpTopic(topic: string): string[] {
     SI: "SIARNK -- Arrival Unknown segment: an information-only segment that keeps itinerary continuity when the passenger changes transport mode mid-trip.",
     SO: "SO<CX><CLASS>[<ddMMM>]<ORIG><DEST> -- Open Flight Segment: no confirmed flight/date yet, keeps segment continuity for pricing/ticketing. A fictitious date is recommended. e.g. SOAFC8AUGCDGMNL, or without a date: SOAFCCDGMNL",
     RTSVC: "RTSVC -- flight service information for the last segment sold (shown after a waitlisted SS).",
-    RT: "RT -- redisplay the active PNR with every element numbered.",
+    RT: "RT -- redisplay the active PNR with every element numbered. Those numbers are what XE uses.",
+    XE: "XE<n> -- cancel one element by its RT number, e.g. XE3. Ranges and lists: XE2-4, XE1,3,5. All-or-nothing: if any number does not exist, nothing is cancelled. On a PNR you already saved, the change only sticks after ER or ET.",
+    IG: "IG -- Ignore: discards everything done since the last ER/ET and clears the screen. On a saved PNR the last saved version is kept untouched. Nothing is saved by IG. Use IR instead to get the saved version back on screen.",
+    IR: "IR -- Ignore and Redisplay: discards everything since the last ER/ET and shows the last saved version of the PNR again. Needs a PNR that was saved at least once.",
     ER: "ER -- End & Retrieve: saves the PNR, hands back a record locator, and leaves the PNR open on screen. Requires the 5 mandatory elements.",
     ET: "ET -- End Transaction: saves the PNR (same 5 mandatory elements as ER) and clears the screen so you can start the next booking.",
   };
@@ -1179,10 +1182,13 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       "SR INFT - <TEXT> /P<n>        REQUEST A SEAT FOR AN (INS) INFANT, TIED TO PASSENGER n",
       "AP / APH <text>              CONTACT (PHONE / HOME)",
       "apm-<number>/P<n>            MOBILE CONTACT FOR PASSENGER n (e.g. apm-09123456789/P1)",
-      "ape-<email>/P<n>             EMAIL CONTACT FOR PASSENGER n (e.g. ape-exazakana@gmail.com/P1)",
+      "ape-<email>/P<n>             EMAIL CONTACT FOR PASSENGER n (e.g. ape-luzeref.ezyxine@gmail.com/P1)",
       "TKOK | TKTL<ddMMM>/<hhmm>     TICKETING ARRANGEMENT",
       "RF <NAME>                     RECEIVED FROM (mandatory before ER)",
       "RT                            DISPLAY THE ACTIVE PNR",
+      "XE<n> / XE<n>-<m> / XE<n>,<n>   CANCEL ELEMENT(S) BY THEIR RT NUMBER",
+      "IG                            IGNORE -- DISCARD CHANGES SINCE LAST SAVE, CLEAR SCREEN",
+      "IR                            IGNORE & REDISPLAY THE LAST SAVED VERSION",
       "ER                            END TRANSACTION & REDISPLAY -- SAVE, PNR STAYS OPEN",
       "ET                            END TRANSACTION -- SAVE, THEN CLEAR THE SCREEN",
       "HE <TOPIC>                    HELP ON ONE ENTRY, e.g. HE TKTL",
@@ -1666,7 +1672,7 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     const m = raw.match(/^(APM|APE)-(.+?)\/P(\d+)$/i);
     if (!m) {
       out.push(`FORMAT INVALID - ${lower} FORMAT IS: ${lower}-<details>/P<n>`);
-      out.push(type === "APM" ? "  e.g. apm-09123456789/P1" : "  e.g. ape-exazakana@gmail.com/P1");
+      out.push(type === "APM" ? "  e.g. apm-09123456789/P1" : "  e.g. ape-luzeref.ezyxine@gmail.com/P1");
       out.push("  P<n> = PASSENGER NUMBER (P1, P2, P3...) THE CONTACT BELONGS TO");
       return { lines: out, state: s };
     }
@@ -1677,7 +1683,7 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
       return { lines: out, state: s };
     }
     if (type === "APE" && !/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(value)) {
-      out.push("INVALID EMAIL ADDRESS - e.g. ape-exazakana@gmail.com/P1");
+      out.push("INVALID EMAIL ADDRESS - e.g. ape-luzeref.ezyxine@gmail.com/P1");
       return { lines: out, state: s };
     }
     const count = s.activePNR.names.length;
@@ -1727,6 +1733,77 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     return { lines: out, state: s };
   }
 
+  // XE<n>[,<n>|-<m>...] -- cancel elements by the number RT shows.
+  // Lists and ranges work together: XE3, XE2-4, XE1,3,5-6. All-or-nothing:
+  // if any number doesn't exist, nothing is cancelled.
+  if (/^XE/.test(cmd)) {
+    const xeMatch = cmd.match(/^XE\s*(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)$/);
+    if (!xeMatch) {
+      out.push("FORMAT INVALID - XE<n> CANCELS AN ELEMENT BY ITS RT NUMBER, e.g. XE3, XE2-4, XE1,3,5. SEE HE XE");
+      return { lines: out, state: s };
+    }
+    const targets = new Set<number>();
+    let badRange = false;
+    xeMatch[1].split(",").forEach((part) => {
+      const [a, b] = part.split("-").map(Number);
+      if (b === undefined) targets.add(a);
+      else if (b < a) badRange = true;
+      else for (let n = a; n <= b; n++) targets.add(n);
+    });
+    if (badRange) {
+      out.push("INVALID RANGE - THE FIRST NUMBER MUST BE LOWER, e.g. XE2-4");
+      return { lines: out, state: s };
+    }
+    const before = getElements(s.activePNR);
+    const missing = [...targets].filter((n) => !before.some((e) => e.index === n)).sort((x, y) => x - y);
+    if (missing.length > 0) {
+      out.push(`ELEMENT ${missing.join(",")} NOT FOUND - NOTHING CANCELLED`);
+      out.push("USE RT TO SEE THE ELEMENT NUMBERS");
+      return { lines: out, state: s };
+    }
+    before
+      .filter((e) => targets.has(e.index))
+      .forEach((e) => out.push(` ${e.index}.${e.text}  -- CANCELLED`));
+    // highest number first, so the numbers still to be cancelled don't shift
+    [...targets].sort((x, y) => y - x).forEach((n) => removeElement(s.activePNR, n));
+    out.push(...renderPNR(s.activePNR));
+    out.push(
+      s.activePNR.locator
+        ? `(PNR ${s.activePNR.locator} CHANGED -- ER OR ET TO SAVE THE CHANGE, IG TO DISCARD IT)`
+        : "(NOT YET SAVED -- ER OR ET WHEN THE PNR IS COMPLETE)"
+    );
+    return { lines: out, state: s };
+  }
+
+  // IG -- ignore: throw away everything since the last ER/ET and clear the screen.
+  // IR -- ignore and redisplay: same discard, but the last saved version comes back.
+  if (cmd === "IG" || cmd === "IR") {
+    const locator = s.activePNR.locator;
+    const saved = locator ? s.savedPNRs[locator] : undefined;
+    if (cmd === "IG") {
+      if (!pnrHasContent(s.activePNR)) {
+        out.push("NOTHING TO IGNORE -- THE SCREEN IS ALREADY EMPTY");
+        return { lines: out, state: s };
+      }
+      s.activePNR = emptyPNR();
+      if (saved) {
+        out.push(`IGNORED -- CHANGES SINCE THE LAST ER/ET DISCARDED. PNR ${locator} STAYS AS LAST SAVED.`);
+        out.push("SCREEN CLEARED. USE IR NEXT TIME TO GET THE SAVED VERSION BACK ON SCREEN.");
+      } else {
+        out.push("IGNORED -- THE PNR IN PROGRESS WAS DISCARDED, NOTHING WAS SAVED. SCREEN CLEARED.");
+      }
+      return { lines: out, state: s };
+    }
+    if (!saved) {
+      out.push("NO SAVED PNR ON SCREEN TO RETURN TO -- IR WORKS ON A PNR YOU SAVED WITH ER (IG CLEARS THE SCREEN)");
+      return { lines: out, state: s };
+    }
+    s.activePNR = JSON.parse(JSON.stringify(saved)) as PNR;
+    out.push(`IGNORED -- CHANGES DISCARDED, PNR ${locator} RESTORED TO ITS LAST SAVED VERSION`);
+    out.push(...renderPNR(s.activePNR));
+    return { lines: out, state: s };
+  }
+
   // RT - redisplay active PNR
   if (cmd === "RT") {
     out.push(...renderPNR(s.activePNR));
@@ -1751,7 +1828,7 @@ export function processCommand(raw: string, state: EngineState): CmdResult {
     }
     const locator = s.activePNR.locator ?? genLocator();
     s.activePNR.locator = locator;
-    s.savedPNRs[locator] = s.activePNR;
+    s.savedPNRs[locator] = JSON.parse(JSON.stringify(s.activePNR)) as PNR;
     out.push(`END OF TRANSACTION COMPLETE - ${locator}`);
     if (cmd === "ET") {
       out.push(`PNR ${locator} SAVED. THE SCREEN IS CLEAR FOR A NEW BOOKING.`);

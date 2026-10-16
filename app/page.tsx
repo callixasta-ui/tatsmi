@@ -63,13 +63,13 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
   {
     section: "PNR BUILD (5 mandatory before ER)",
     rows: [
-      { cmd: "NM1SMITH/JOHN MR", desc: "Add passenger name (title optional)" },
+      { cmd: "NM1EZYXINE/LUZEREF MR", desc: "Add passenger name (title optional)" },
       { cmd: "AP 6621234567", desc: "Phone contact" },
       { cmd: "apm-09123456789/P1", desc: "Mobile contact for passenger 1 (hyphen, then /P + passenger number: /P2, /P3...)" },
       { cmd: "APH 021234567", desc: "Home contact" },
-      { cmd: "ape-exazakana@gmail.com/P1", desc: "Email contact for passenger 1 (same format; /P2 for the second passenger...)" },
+      { cmd: "ape-luzeref.ezyxine@gmail.com/P1", desc: "Email contact for passenger 1 (same format; /P2 for the second passenger...)" },
       { cmd: "TKOK / TKTL20JAN/1700", desc: "Ticketing arrangement: no limit / real date+time deadline" },
-      { cmd: "RF JDOE", desc: "Received From -- your signature, mandatory" },
+      { cmd: "RF LE", desc: "Received From -- your signature, mandatory" },
     ],
   },
   {
@@ -78,6 +78,15 @@ const REFERENCE: { section: string; rows: { cmd: string; desc: string }[] }[] = 
       { cmd: "RT", desc: "Redisplay the active (in-progress) PNR, elements numbered" },
       { cmd: "ER", desc: "End & redisplay -- saves the PNR, gives a record locator, PNR stays open on screen" },
       { cmd: "ET", desc: "End transaction -- saves the PNR, then clears the screen for the next booking" },
+    ],
+  },
+  {
+    section: "CHANGE & IGNORE",
+    rows: [
+      { cmd: "XE3", desc: "Cancel element 3 (numbers come from RT)" },
+      { cmd: "XE2-4 / XE1,3,5", desc: "Cancel a range / a list of elements in one entry" },
+      { cmd: "IG", desc: "Ignore -- discard everything since the last ER/ET and clear the screen" },
+      { cmd: "IR", desc: "Ignore & redisplay -- discard changes, bring the last saved PNR back" },
     ],
   },
   {
@@ -708,7 +717,7 @@ export default function Page() {
                     value={nameDraft}
                     autoFocus
                     maxLength={40}
-                    placeholder="e.g. Jane Doe"
+                    placeholder="e.g. Luzeref Ezyxine"
                     onChange={(e) => setNameDraft(e.target.value)}
                   />
                   <div className="level-actions" style={{ marginTop: 10 }}>

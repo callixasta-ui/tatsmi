@@ -43,7 +43,7 @@ before `ER` will save it — same as the real system, and `ER` tells you
 exactly which of the five you're missing. A few syntax details that are
 easy to get wrong and are modeled faithfully here:
 
-- Mobile and email use a hyphenated, lowercase format ending in the passenger number: `apm-09123456789/P1`, `ape-exazakana@gmail.com/P1`. `/P<n>` is the passenger the contact belongs to (`P1` first passenger, `P2` second, ...), so the passenger must already be in the PNR. Plain phone is `AP`, home is `APH`.
+- Mobile and email use a hyphenated, lowercase format ending in the passenger number: `apm-09123456789/P1`, `ape-luzeref.ezyxine@gmail.com/P1`. `/P<n>` is the passenger the contact belongs to (`P1` first passenger, `P2` second, ...), so the passenger must already be in the PNR. Plain phone is `AP`, home is `APH`.
 - `TKTL` takes a real date **and time**: `TKTL20JAN/1700`, not just a date.
 - Selling into a class showing 0 seats doesn't fail — it waitlists (`HL`
   instead of `HK`), same as a real system. A fully closed class (`C`) does

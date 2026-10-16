@@ -28,11 +28,11 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       "A real PNR needs 5 mandatory elements before it can be saved: a name, a segment, a contact, a ticketing " +
       "arrangement, and a Received From. Miss one and ER will refuse — on purpose, same as the real system.",
     steps: [
-      { instruction: "Add the passenger: SMITH / JOHN, title MR.", hint: "NM1SMITH/JOHN MR", matcher: /^NM\d+SMITH\/JOHN(\s+MR)?$/ },
+      { instruction: "Add the passenger: EZYXINE / LUZEREF, title MR.", hint: "NM1EZYXINE/LUZEREF MR", matcher: /^NM\d+EZYXINE\/LUZEREF(\s+MR)?$/ },
       { instruction: "Add a phone contact.", hint: "AP 6621234567", matcher: /^AP\s+6621234567$/ },
-      { instruction: "Add an email contact too. Email uses the ape- format: lowercase, a hyphen, the address, then /P and the passenger number (John is passenger 1, so /P1).", hint: "ape-john@example.com/P1", matcher: /^APE-JOHN@EXAMPLE\.COM\/P1$/ },
+      { instruction: "Add an email contact too. Email uses the ape- format: lowercase, a hyphen, the address, then /P and the passenger number (Luzeref is passenger 1, so /P1).", hint: "ape-luzeref.ezyxine@gmail.com/P1", matcher: /^APE-LUZEREF\.EZYXINE@GMAIL\.COM\/P1$/ },
       { instruction: "Set the ticketing arrangement to no time limit.", hint: "TKOK", matcher: /^TKOK$/ },
-      { instruction: "Add your Received From signature — this is who's making the booking, mandatory on every PNR.", hint: "RF JDOE", matcher: /^RF\s*JDOE$/ },
+      { instruction: "Add your Received From signature — this is who's making the booking, mandatory on every PNR.", hint: "RF LE", matcher: /^RF\s*LE$/ },
       { instruction: "Review the PNR before saving.", hint: "RT", matcher: /^RT$/ },
       { instruction: "Save it — End & Retrieve hands back a record locator.", hint: "ER", matcher: /^ER$/ },
       { instruction: "ER leaves the PNR open on screen. Done with this booking? End Transaction — it saves again and wipes the area so the next booking starts clean.", hint: "ET", matcher: /^ET$/ },
@@ -113,6 +113,22 @@ export const PRACTICE_TASKS: PracticeTask[] = [
       { instruction: "You misspelled the child's title -- use Name Update to fix passenger 2's title only (keep MICHAEL, switch to MSTR).", hint: "NU2/MICHAEL MSTR", matcher: /^NU2\/MICHAEL\s+MSTR$/ },
       { instruction: "Between two of this trip's flights the passenger is taking a train, not a plane -- keep the itinerary continuous with an Arrival Unknown segment.", hint: "SIARNK", matcher: /^SIARNK$/ },
       { instruction: "Review the PNR once more to see the ARNK sitting in the segment sequence.", hint: "RT", matcher: /^RT$/ },
+    ],
+  },
+  {
+    id: "t6-xe-ig",
+    title: "9. Fix a Mistake: XE & IG",
+    goal:
+      "XE cancels elements by the number RT shows. IG throws away everything you haven't saved and clears the screen. " +
+      "Start this task from a clean screen so the element numbers match.",
+    steps: [
+      { instruction: "Add the passenger: EZYXINE / LUZEREF, title MR.", hint: "NM1EZYXINE/LUZEREF MR", matcher: /^NM\d+EZYXINE\/LUZEREF(\s+MR)?$/ },
+      { instruction: "Add a phone contact, but with a wrong number on purpose: 09120000000.", hint: "AP 09120000000", matcher: /^AP\s+09120000000$/ },
+      { instruction: "Review the PNR. Every element has a number -- the name is 1, so the wrong phone is 2.", hint: "RT", matcher: /^RT$/ },
+      { instruction: "Cancel the wrong phone by its element number.", hint: "XE2", matcher: /^XE2$/ },
+      { instruction: "Add the right phone: 6621234567.", hint: "AP 6621234567", matcher: /^AP\s+6621234567$/ },
+      { instruction: "Changed your mind about the whole booking? Ignore it -- nothing was saved, so IG discards it and clears the screen.", hint: "IG", matcher: /^IG$/ },
+      { instruction: "Check the screen is really empty.", hint: "RT", matcher: /^RT$/ },
     ],
   },
 ];
